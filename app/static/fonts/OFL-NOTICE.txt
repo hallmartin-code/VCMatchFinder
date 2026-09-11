@@ -1,0 +1,8 @@
+Fonts in this folder are static instances of open-source families, each licensed under the
+SIL Open Font License, Version 1.1 (full text: app/assets/fonts/OFL.txt, or
+https://openfontlicense.org). They are redistributed unmodified apart from pinning each
+weight of the upstream variable font.
+
+  Sora            Copyright 2019 The Sora Project Authors (https://github.com/sora-xor/sora-font)
+  Inter           Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
+  JetBrains Mono  Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)

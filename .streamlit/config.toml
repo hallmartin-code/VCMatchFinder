@@ -1,0 +1,60 @@
+# Port and address are passed on the command line by Railway (railway.json / Procfile).
+
+[server]
+headless = true
+# Keep in step with TEN_MAX_UPLOAD_MB, which the app validates against.
+maxUploadSize = 50
+fileWatcherType = "none"
+# Serves app/static at /app/static: the self-hosted brand fonts, favicons and manifest.
+enableStaticServing = true
+
+[browser]
+# Confidential decks: do not send usage statistics.
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+# TEN Capital brand (dark navy). Mirrors TOKENS in app/ui/theme.py, so the first frame
+# is already on-brand before the design-system CSS loads.
+[theme]
+base = "dark"
+primaryColor = "#EE5A4E"
+backgroundColor = "#0B1526"
+secondaryBackgroundColor = "#16283F"
+textColor = "#F3F6FA"
+linkColor = "#35BEBB"
+font = "Inter, system-ui, sans-serif"
+headingFont = "Sora, Inter, sans-serif"
+codeFont = "JetBrains Mono, monospace"
+
+# Self-hosted fonts (SIL OFL, see app/static/fonts/OFL-NOTICE.txt) - no font CDN calls.
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/Inter-Regular.ttf"
+weight = "400"
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/fonts/Inter-SemiBold.ttf"
+weight = "600"
+
+[[theme.fontFaces]]
+family = "Sora"
+url = "app/static/fonts/Sora-Bold.ttf"
+weight = "700"
+
+[[theme.fontFaces]]
+family = "Sora"
+url = "app/static/fonts/Sora-ExtraBold.ttf"
+weight = "800"
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/JetBrainsMono-Regular.ttf"
+weight = "400"
+
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/JetBrainsMono-Medium.ttf"
+weight = "500"

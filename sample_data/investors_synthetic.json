@@ -1,0 +1,268 @@
+{
+  "dataset": {
+    "name": "TEN Capital synthetic investor dataset v1",
+    "is_synthetic": true,
+    "description": "Fictitious investors for testing and demonstration only. None of these firms, deals or URLs are real; any resemblance to real organizations is coincidental. Do not use for outreach.",
+    "last_updated": "2026-09-01"
+  },
+  "investors": [
+    {
+      "investor_id": "aldermoor-health-ventures",
+      "name": "Aldermoor Health Ventures",
+      "investor_type": "Venture capital",
+      "website": "https://aldermoor.example",
+      "headquarters": "Boston, MA",
+      "investment_geographies": ["United States"],
+      "sector_preferences": ["diagnostics", "medical devices", "digital health"],
+      "stage_preferences": ["Series A", "Series B"],
+      "min_check": "$2M",
+      "max_check": "$6M",
+      "typical_check": "$3.5M",
+      "lead_capability": "Yes",
+      "portfolio_companies": ["Cortexa Diagnostics", "Brightline Assays", "Venalyx Medical"],
+      "historical_investments": [
+        {"company": "Cortexa Diagnostics", "sector": "diagnostics", "stage": "Series A", "year": 2025, "led": true, "source_url": "https://aldermoor.example/portfolio/cortexa"},
+        {"company": "Brightline Assays", "sector": "diagnostics", "stage": "Series A", "year": 2024, "led": true, "source_url": "https://aldermoor.example/portfolio/brightline"},
+        {"company": "Venalyx Medical", "sector": "medical devices", "stage": "Series B", "year": 2023, "led": false}
+      ],
+      "last_known_investment": "2026-05-12",
+      "strategic_capabilities": ["regulatory strategy (FDA 510(k))", "hospital network introductions", "follow-on reserves"],
+      "business_model_preferences": ["device + consumables", "reimbursed testing"],
+      "fund_vintage": 2024,
+      "fund_size": "$180M",
+      "fund_status": "Fund III closed 2024, actively deploying",
+      "source_urls": ["https://aldermoor.example/thesis"],
+      "last_verified": "2026-07-15"
+    },
+    {
+      "investor_id": "kestrow-medtech-partners",
+      "name": "Kestrow MedTech Partners",
+      "investor_type": "Venture capital",
+      "headquarters": "Minneapolis, MN",
+      "investment_geographies": ["North America"],
+      "sector_preferences": ["medtech", "diagnostics"],
+      "stage_preferences": ["Seed", "Series A"],
+      "check_size": "$1.5M-$4M",
+      "lead_capability": "Yes",
+      "historical_investments": [
+        {"company": "Pulsera Devices", "sector": "medical devices", "stage": "Seed", "year": 2025, "led": true}
+      ],
+      "last_known_investment": "2026-02-01",
+      "strategic_capabilities": ["manufacturing scale-up", "regulatory"],
+      "fund_status": "active"
+    },
+    {
+      "investor_id": "corvane-instruments-ventures",
+      "name": "Corvane Instruments Ventures",
+      "investor_type": "Corporate / CVC",
+      "website": "https://corvane.example/ventures",
+      "headquarters": "Chicago, IL",
+      "investment_geographies": ["Global"],
+      "sector_preferences": ["diagnostics", "life science tools", "lab automation"],
+      "stage_preferences": ["Series A", "Series B", "Series C"],
+      "check_size": "$1M-$3M",
+      "lead_capability": "No - follows a financial lead",
+      "historical_investments": [
+        {"company": "Brightline Assays", "sector": "diagnostics", "stage": "Series A", "year": 2024, "led": false, "source_url": "https://corvane.example/ventures/news"}
+      ],
+      "strategic_capabilities": ["distribution", "manufacturing", "hospital lab channel access"],
+      "business_model_preferences": ["device + consumables"],
+      "fund_status": "Corporate balance sheet, active",
+      "source_urls": ["https://corvane.example/ventures"],
+      "last_verified": "2026-03-01"
+    },
+    {
+      "investor_id": "halden-family-office",
+      "name": "Halden Family Office",
+      "investor_type": "Family office",
+      "headquarters": "Dallas, TX",
+      "investment_geographies": ["Texas", "US South"],
+      "sector_preferences": ["healthcare"],
+      "stage_preferences": ["Seed", "Series A", "Series B"],
+      "check_size": "$500K-$2M",
+      "lead_capability": "Sometimes",
+      "fund_status": "Evergreen, active",
+      "notes": "Prefers co-investing alongside a specialist lead."
+    },
+    {
+      "investor_id": "ironvale-growth-partners",
+      "name": "Ironvale Growth Partners",
+      "investor_type": "Growth equity",
+      "headquarters": "New York, NY",
+      "investment_geographies": ["United States", "Europe"],
+      "sector_preferences": ["healthcare", "enterprise software"],
+      "stage_preferences": ["Series C", "Growth"],
+      "check_size": "$15M-$50M",
+      "lead_capability": "Yes",
+      "min_revenue": "$10M",
+      "fund_status": "active"
+    },
+    {
+      "investor_id": "northgate-software-capital",
+      "name": "Northgate Software Capital",
+      "investor_type": "Venture capital",
+      "headquarters": "San Francisco, CA",
+      "investment_geographies": ["United States"],
+      "sector_preferences": ["enterprise software", "fintech"],
+      "stage_preferences": ["Series A", "Series B"],
+      "check_size": "$3M-$8M",
+      "lead_capability": "Yes",
+      "historical_investments": [
+        {"company": "Streamwell", "sector": "enterprise software", "stage": "Series B", "year": 2025, "led": true}
+      ],
+      "fund_status": "active"
+    },
+    {
+      "investor_id": "pellucid-angels",
+      "name": "Pellucid Angels",
+      "investor_type": "Angel group",
+      "headquarters": "Houston, TX",
+      "investment_geographies": ["Texas"],
+      "sector_preferences": ["life sciences", "healthcare"],
+      "stage_preferences": ["Pre-Seed", "Seed"],
+      "check_size": "$100K-$500K",
+      "lead_capability": "No",
+      "historical_investments": [
+        {"company": "Tessera Bio", "sector": "therapeutics", "stage": "Seed", "year": 2025, "led": false}
+      ],
+      "fund_status": "active"
+    },
+    {
+      "investor_id": "quarry-lane-capital",
+      "name": "Quarry Lane Capital",
+      "investor_type": "Venture capital",
+      "headquarters": "Nashville, TN",
+      "investment_geographies": ["United States"],
+      "sector_preferences": ["diagnostics"],
+      "stage_preferences": ["Series A"],
+      "check_size": "$2M-$5M",
+      "lead_capability": "Yes",
+      "fund_status": "Fund II fully deployed; Fund III raising, no new investments until 2027"
+    },
+    {
+      "investor_id": "tidewell-impact-fund",
+      "name": "Tidewell Impact Fund",
+      "investor_type": "Impact",
+      "website": "https://tidewell.example",
+      "headquarters": "Denver, CO",
+      "investment_geographies": ["United States"],
+      "sector_preferences": ["health equity", "digital health", "diagnostics"],
+      "stage_preferences": ["Seed", "Series A"],
+      "check_size": "$1M-$3M",
+      "lead_capability": "Sometimes",
+      "historical_investments": [
+        {"company": "Remedia Health", "sector": "digital health", "stage": "Seed", "year": 2025, "led": true, "source_url": "https://tidewell.example/portfolio"}
+      ],
+      "last_known_investment": "2026-04-18",
+      "strategic_capabilities": ["customer access to community health systems", "reimbursement strategy"],
+      "fund_status": "active",
+      "source_urls": ["https://tidewell.example/thesis"],
+      "last_verified": "2026-06-20"
+    },
+    {
+      "investor_id": "marrow-and-pine-ventures",
+      "name": "Marrow & Pine Ventures",
+      "investor_type": "Venture capital",
+      "headquarters": "Philadelphia, PA",
+      "investment_geographies": ["United States"],
+      "sector_preferences": ["diagnostics", "medtech"],
+      "stage_preferences": ["Series A"],
+      "check_size": "$2M-$5M",
+      "lead_capability": "Yes",
+      "portfolio_companies": ["Sepsiq Labs", "Orrin Surgical"],
+      "fund_status": "active"
+    },
+    {
+      "investor_id": "everline-health-system-ventures",
+      "name": "Everline Health System Ventures",
+      "investor_type": "Health system",
+      "website": "https://everline.example/ventures",
+      "headquarters": "Cleveland, OH",
+      "investment_geographies": ["United States"],
+      "sector_preferences": ["diagnostics", "digital health", "healthcare services"],
+      "stage_preferences": ["Series A", "Series B"],
+      "check_size": "$500K-$2.5M",
+      "lead_capability": "No",
+      "historical_investments": [
+        {"company": "Cortexa Diagnostics", "sector": "diagnostics", "stage": "Series A", "year": 2025, "led": false, "source_url": "https://everline.example/ventures/cortexa"}
+      ],
+      "last_known_investment": "2025-11-03",
+      "strategic_capabilities": ["clinical validation sites", "customer access (18-hospital system)", "reimbursement"],
+      "fund_status": "active",
+      "source_urls": ["https://everline.example/ventures"],
+      "last_verified": "2026-08-01"
+    },
+    {
+      "investor_id": "solenne-european-health-fund",
+      "name": "Solenne European Health Fund",
+      "investor_type": "Venture capital",
+      "headquarters": "Amsterdam, Netherlands",
+      "investment_geographies": ["Europe"],
+      "sector_preferences": ["diagnostics", "medtech"],
+      "stage_preferences": ["Seed", "Series A"],
+      "check_size": "$1M-$4M",
+      "lead_capability": "Yes",
+      "fund_status": "active"
+    },
+    {
+      "name": "ALDERMOOR HEALTH VENTURES, LLC",
+      "investor_type": "VC",
+      "website": "aldermoor.example",
+      "sector_preferences": ["diagnostics"],
+      "portfolio_companies": ["Cortexa Diagnostics", "Halcyon Assays"],
+      "notes": "Duplicate row from a CRM export."
+    },
+    {
+      "name": "Upland Ridge Partners",
+      "notes": "Name only - imported from an event attendee list."
+    },
+    {
+      "investor_id": "brightwater-seed-collective",
+      "name": "Brightwater Seed Collective",
+      "investor_type": "Seed fund",
+      "headquarters": "Austin, TX",
+      "investment_geographies": ["Texas", "US South"],
+      "sector_preferences": ["healthcare", "diagnostics", "enterprise software"],
+      "stage_preferences": ["Pre-Seed", "Seed"],
+      "check_size": "$250K-$1M",
+      "lead_capability": "Yes",
+      "historical_investments": [
+        {"company": "Lumora Diagnostics", "sector": "diagnostics", "stage": "Seed", "year": 2024, "led": true, "source_url": "https://brightwater.example/portfolio"}
+      ],
+      "last_known_investment": "2026-03-09",
+      "fund_status": "active",
+      "source_urls": ["https://brightwater.example"],
+      "last_verified": "2026-05-30"
+    },
+    {
+      "investor_id": "cedar-line-syndicate",
+      "name": "Cedar Line Syndicate",
+      "investor_type": "Syndicate",
+      "investment_geographies": ["United States"],
+      "sector_preferences": ["healthcare"],
+      "stage_preferences": ["Seed", "Series A"],
+      "check_size": "$250K-$1.5M",
+      "lead_capability": "No",
+      "last_known_investment": "2023-11-01",
+      "fund_status": "active"
+    },
+    {
+      "investor_id": "harrowgate-medical-strategics",
+      "name": "Harrowgate Medical Strategics",
+      "investor_type": "Medical-device strategic",
+      "headquarters": "Minneapolis, MN",
+      "investment_geographies": ["Global"],
+      "sector_preferences": ["diagnostics", "medtech"],
+      "stage_preferences": ["Series A", "Series B", "Series C"],
+      "check_size": "$3M-$10M",
+      "lead_capability": "Sometimes",
+      "historical_investments": [
+        {"company": "Venalyx Medical", "sector": "medical devices", "stage": "Series B", "year": 2023, "led": false, "source_url": "https://harrowgate.example/news"}
+      ],
+      "strategic_capabilities": ["global distribution", "manufacturing", "regulatory"],
+      "fund_status": "active",
+      "source_urls": ["https://harrowgate.example/ventures"],
+      "last_verified": "2025-01-10"
+    }
+  ]
+}

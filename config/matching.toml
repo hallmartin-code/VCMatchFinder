@@ -1,0 +1,36 @@
+# TEN Capital Investor Matching Engine - matching configuration.
+# Every value here is optional; omitted keys fall back to the defaults in app/config.py.
+
+[weights]
+# Criterion weights. They do not have to sum to 100 - they are normalized - but the
+# defaults do, so each weight reads directly as "points out of 100".
+stage = 15
+sector = 20
+check_size = 15
+geography = 10
+business_model = 10
+traction = 10
+historical_evidence = 10
+strategic_value = 5
+lead_capability = 5
+
+[scoring]
+# Raw score (0-100) given to a criterion when the data needed to judge it is missing.
+# Deliberately below any positive evidence: missing data must never read as a fit.
+unknown_raw_score = 40
+# How strongly evidence confidence pulls the ranking score down (0 = ignore, 1 = full).
+# adjusted = fit * (1 - blend + blend * confidence)
+confidence_blend = 0.5
+# Ranking bonus per matched user preference (investor type / geography), and its cap.
+preference_bonus_per_match = 2.0
+preference_bonus_cap = 4.0
+# Investor data older than this is not treated as "verified".
+verification_max_age_days = 365
+# An investor with no recorded investment for this long is flagged as possibly inactive.
+stale_activity_months = 24
+
+[ranking]
+top_n = 8
+tier1_min_adjusted = 68
+tier2_min_adjusted = 56
+tier3_min_adjusted = 42

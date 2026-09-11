@@ -1,0 +1,12 @@
+# Never upload secrets or local outputs. Secrets are set as Railway variables.
+.env
+.env.*
+!.env.example
+output/*
+!output/.gitkeep
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+.venv/
+venv/

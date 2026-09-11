@@ -1,0 +1,17 @@
+# Pinned to the versions verified on Python 3.12 (the Railway runtime, see .python-version).
+# Loosen deliberately and re-run the test suite when upgrading.
+
+# Runtime
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.3
+pymupdf==1.28.2
+python-pptx==1.0.2
+reportlab==5.0.1
+streamlit==1.63.0
+# Claude API (used when TEN_LLM_ENABLED=true and an API key is configured)
+anthropic==1.5.0
+
+# Development
+pytest==9.1.1
+pytest-cov==7.1.0

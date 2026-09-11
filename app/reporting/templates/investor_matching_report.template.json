@@ -1,0 +1,454 @@
+{
+  "template_id": "ten_capital_investor_matching_report",
+  "template_version": "1.0",
+  "description": "Canonical structure of the one-page TEN Capital Investor Matching Report. Defines page geometry, typography, section order, every field slot (label, placeholder, record binding, format, length limit, empty text), the match-table columns, the footer, the controlled vocabularies, and the fields analyzed for every report. Contains no company-, investor- or deal-specific content. The PDF generator reads its structure from this file.",
+  "document_title": "TEN CAPITAL — INVESTOR MATCHING REPORT",
+
+  "page": {
+    "size": "US Letter",
+    "orientation": "portrait",
+    "width_pt": 612,
+    "height_pt": 792,
+    "pages": 1,
+    "margins_pt": { "left": 36, "right": 36, "top": 32, "bottom": 48 },
+    "content_width_pt": 540,
+    "background": "White; no charts or decorative graphics"
+  },
+
+  "typography": {
+    "family": "Open Sans",
+    "fallback": "Helvetica",
+    "title_pt": 15,
+    "section_heading_pt": 10.5,
+    "section_heading_case": "upper",
+    "body_pt": 9,
+    "body_floor_pt": 8,
+    "table_pt": 8,
+    "table_floor_pt": 7.2,
+    "footer_pt": 7,
+    "weights": {
+      "title": "Bold, navy",
+      "section_heading": "Bold, navy, upper case, 0.6 pt navy rule beneath",
+      "labels": "SemiBold, grey",
+      "body": "Regular, ink",
+      "table_header": "Bold, white on navy",
+      "callout": "SemiBold, navy on light-blue fill with a blue left bar"
+    }
+  },
+
+  "palette": {
+    "navy": "#1F3864",
+    "blue": "#2E75B6",
+    "ink": "#222222",
+    "grey": "#555555",
+    "light_grey": "#8A8A8A",
+    "rule": "#D9D9D9",
+    "zebra": "#F4F6F9",
+    "callout_fill": "#EEF3FA",
+    "warning": "#8C1D18",
+    "tier_colors": { "tier_1": "#2E7D32", "tier_2": "#2E75B6", "tier_3": "#555555", "tier_4": "#B26A00", "do_not_target": "#8C1D18" },
+    "confidence_colors": { "High": "#2E7D32", "Medium": "#B26A00", "Low": "#8C1D18" }
+  },
+
+  "rules": [
+    "The report renders on exactly one page with no clipping or overflow.",
+    "Content is reduced before typography; body text never drops below 8 pt and table text never below 7.2 pt.",
+    "A slot with no established value renders its empty_text, never an estimate.",
+    "Values that were inferred or user-supplied carry a provenance marker; deck facts carry none.",
+    "Investor names, deals and check sizes come only from an investor dataset; categories are shown as profiles, never as named firms.",
+    "Fit scores are deterministic (0–100) and are always shown with the confidence-adjusted score.",
+    "Rows are ordered by outreach priority tier, then by ranking score.",
+    "The synthetic-data warning appears whenever any investor record is synthetic.",
+    "The footer, including the confidentiality line, is mandatory and must not be altered or removed."
+  ],
+
+  "placeholder_syntax": {
+    "pattern": "[FIELD NAME]",
+    "note": "Placeholders are replaced at render time from the record path named in each slot's 'source'. Money renders as $1.2K / $3.4M / $5.6B; dates as 'Month D, YYYY'."
+  },
+
+  "provenance_markers": {
+    "inference": "(inferred)",
+    "user_supplied": "(user)",
+    "external_source": "(external)"
+  },
+
+  "sections": [
+    {
+      "id": "header",
+      "order": 1,
+      "heading": null,
+      "component": "title_block",
+      "fields": [
+        {
+          "key": "document_title",
+          "label": "Document title",
+          "type": "static_text",
+          "value": "TEN CAPITAL — INVESTOR MATCHING REPORT",
+          "style": "title",
+          "required": true
+        },
+        {
+          "key": "meta_line",
+          "label": "Meta line",
+          "type": "composed_text",
+          "placeholder": "[COMPANY NAME] · Prepared [MONTH D, YYYY] · Analysis [ANALYSIS ID]",
+          "format": "{company_name} · Prepared {prepared} · Analysis {analysis_id_short}",
+          "source": ["company.name", "timestamp", "analysis_id"],
+          "empty_text": "Unnamed company",
+          "required": true
+        },
+        {
+          "key": "synthetic_warning",
+          "label": "Synthetic-data warning",
+          "type": "conditional_text",
+          "value": "Investor data: SYNTHETIC test dataset — named firms are fictitious and must not be used for outreach.",
+          "condition": "investor_dataset.is_synthetic",
+          "style": "warning"
+        }
+      ]
+    },
+    {
+      "id": "company_snapshot",
+      "order": 2,
+      "heading": "Company Snapshot",
+      "component": "key_value_grid",
+      "grid_columns": 2,
+      "label_width_pt": 74,
+      "max_chars": 80,
+      "empty_text": "Not in deck",
+      "fields": [
+        {
+          "key": "company",
+          "label": "Company",
+          "placeholder": "[COMPANY NAME] · [WEBSITE]",
+          "source": ["company.name", "company_provenance.website.value"],
+          "format": "{name} · {website}",
+          "provenance_from": ["name"],
+          "required": true
+        },
+        {
+          "key": "sector",
+          "label": "Sector",
+          "placeholder": "[SECTOR FAMILY] / [SUBSECTOR]",
+          "source": ["company.sector", "company.subsector"],
+          "format": "{sector} / {subsector}",
+          "vocabulary": ["sector_families", "subsectors"],
+          "provenance_from": ["subsector", "sector"]
+        },
+        {
+          "key": "stage",
+          "label": "Stage",
+          "placeholder": "[COMPANY STAGE] · product [PRODUCT STAGE]",
+          "source": ["company.stage", "company.product_stage"],
+          "format": "{stage} · product {product_stage}",
+          "vocabulary": ["stages", "product_stages"],
+          "provenance_from": ["company_stage"]
+        },
+        {
+          "key": "geography",
+          "label": "Geography",
+          "placeholder": "[CITY, STATE (COUNTRY)]",
+          "source": "company.geography",
+          "provenance_from": ["headquarters"]
+        },
+        {
+          "key": "business_model",
+          "label": "Business Model",
+          "placeholder": "[BUSINESS MODEL]",
+          "source": "company.business_model",
+          "vocabulary": ["business_models"],
+          "provenance_from": ["business_model"]
+        },
+        {
+          "key": "traction",
+          "label": "Traction",
+          "placeholder": "[CUSTOMERS / PILOTS] · [$ REVENUE] revenue · [GROWTH]% growth · [LOIs]",
+          "source": "company.traction",
+          "format": "Composed from extracted traction facts, joined with ' · '",
+          "provenance_from": ["traction"]
+        },
+        {
+          "key": "round",
+          "label": "Round",
+          "placeholder": "[$ RAISE] [ROUND TYPE] · [$ COMMITTED] committed · lead: [LEAD INVESTOR | open]",
+          "source": ["company.raise_amount", "company.round_type", "company.round_committed", "company.lead_investor"],
+          "format": "{raise} {round_type} · {committed} committed · lead: {lead_investor or 'open'}",
+          "provenance_from": ["raise_amount", "round_type"]
+        },
+        {
+          "key": "valuation",
+          "label": "Valuation",
+          "placeholder": "[$ VALUATION] [pre-money | post-money | valuation cap]",
+          "source": ["company.valuation", "company.valuation_type"],
+          "format": "{valuation} {valuation_type}",
+          "provenance_from": ["valuation"]
+        },
+        {
+          "key": "capital_raised",
+          "label": "Capital Raised",
+          "placeholder": "[$ CAPITAL RAISED] to date",
+          "source": "company.amount_raised",
+          "format": "{amount_raised} to date",
+          "provenance_from": ["amount_raised"]
+        },
+        {
+          "key": "strategic_need",
+          "label": "Strategic Need",
+          "placeholder": "[STRATEGIC NEED 1], [STRATEGIC NEED 2], [STRATEGIC NEED 3]",
+          "source": "company.strategic_needs",
+          "max_items": 3,
+          "vocabulary": ["strategic_needs"],
+          "provenance_from": ["strategic_needs"]
+        }
+      ]
+    },
+    {
+      "id": "ideal_investor_profile",
+      "order": 3,
+      "heading": "Ideal Investor Profile",
+      "component": "bullet_list",
+      "source": "ideal_investor_profile.summary_points",
+      "min_items": 3,
+      "max_items": 5,
+      "max_chars": 118,
+      "empty_text": "Not enough company data to profile the ideal investor.",
+      "fields": [
+        {
+          "key": "stage_and_check",
+          "label": "Stage and check size",
+          "placeholder": "[LEAD-CAPABLE] [STAGE] investor able to write [$ LEAD CHECK RANGE] into the [$ ROUND SIZE] round",
+          "source": ["ideal_investor_profile.lead_required", "ideal_investor_profile.target_stages", "ideal_investor_profile.lead_check_range"],
+          "rule": "Lead check range = 25–60% of the round; 'Lead-capable' only when the round still needs a lead.",
+          "required": true
+        },
+        {
+          "key": "sector_specialization",
+          "label": "Sector specialization",
+          "placeholder": "[SUBSECTOR] specialist with [TECHNICAL EXPERTISE] depth",
+          "source": ["ideal_investor_profile.sector_specialization", "ideal_investor_profile.technical_expertise"]
+        },
+        {
+          "key": "regulatory_expertise",
+          "label": "Regulatory expertise",
+          "placeholder": "Comfortable with regulatory risk: [REGULATORY EXPERTISE]",
+          "source": "ideal_investor_profile.regulatory_expertise",
+          "condition": "Regulated subsectors only"
+        },
+        {
+          "key": "strategic_fit",
+          "label": "Strategic vs. financial fit",
+          "placeholder": "[FINANCIAL LEAD | FINANCIAL LEAD PLUS A STRATEGIC CO-INVESTOR FOR STRATEGIC NEEDS]",
+          "source": ["ideal_investor_profile.strategic_vs_financial", "ideal_investor_profile.commercialization_expertise"]
+        },
+        {
+          "key": "geographic_fit",
+          "label": "Geographic mandate",
+          "placeholder": "Mandate covering [STATE / COUNTRY]",
+          "source": "ideal_investor_profile.geographic_fit"
+        }
+      ]
+    },
+    {
+      "id": "top_investor_matches",
+      "order": 4,
+      "heading": "Top Investor Matches",
+      "component": "match_table",
+      "source": "top_matches",
+      "min_items": 5,
+      "max_items": 8,
+      "row_order": "Outreach priority tier (Tier 1 first), then confidence-adjusted ranking score",
+      "empty_text": "No investors could be matched. Add investor data or complete the missing company fields, then re-run.",
+      "caption": "Fit = deterministic 0–100 score; adj = confidence-adjusted. Evidence: Verified › Strong › Moderate › Inferred › Unknown. Italic rows are investor profiles, not named firms.",
+      "row_rules": [
+        "Named investors come first; archetype profiles fill remaining rows only when fewer than five named investors are viable.",
+        "Archetype rows render the name in italics with the subtitle 'profile, not a named firm'.",
+        "Rows with outreach priority 'Do Not Target' are never shown."
+      ],
+      "columns": [
+        {
+          "key": "investor",
+          "header": "Investor",
+          "width_fraction": 0.17,
+          "placeholder": "[INVESTOR NAME]",
+          "secondary_placeholder": "[TIER] · [INVESTOR TYPE]",
+          "source": "top_matches[].investor",
+          "secondary_source": ["top_matches[].outreach_priority_key", "top_matches[].investor_type"],
+          "style": "Name bold (italic for profiles); tier short label in its tier colour",
+          "vocabulary": ["tier_short", "investor_types"]
+        },
+        {
+          "key": "fit",
+          "header": "Fit",
+          "width_fraction": 0.062,
+          "placeholder": "[FIT]",
+          "secondary_placeholder": "adj [ADJ]",
+          "source": "top_matches[].fit_score",
+          "secondary_source": "top_matches[].adjusted_score",
+          "format": "integer 0–100"
+        },
+        {
+          "key": "confidence",
+          "header": "Confidence",
+          "width_fraction": 0.108,
+          "placeholder": "[LEVEL]",
+          "secondary_placeholder": "[EVIDENCE]",
+          "source": "top_matches[].confidence",
+          "secondary_source": "top_matches[].evidence_quality",
+          "style": "Level bold in its confidence colour",
+          "vocabulary": ["confidence", "evidence_quality"]
+        },
+        {
+          "key": "why",
+          "header": "Why It Fits",
+          "width_fraction": 0.21,
+          "placeholder": "[WHY IT FITS — the top two or three criteria that scored as a fit]",
+          "source": "top_matches[].rationale",
+          "max_chars": 130,
+          "target_chars": 95
+        },
+        {
+          "key": "concern",
+          "header": "Concern",
+          "width_fraction": 0.165,
+          "placeholder": "[MOST LIKELY CONCERN]",
+          "source": "top_matches[].likely_concerns[0]",
+          "max_chars": 80,
+          "target_chars": 55,
+          "empty_text": "None identified"
+        },
+        {
+          "key": "angle",
+          "header": "Outreach Angle",
+          "width_fraction": 0.285,
+          "placeholder": "[OUTREACH ANGLE — the company's strongest proof point tied to the investor's strongest criterion]",
+          "source": "top_matches[].outreach_angle",
+          "max_chars": 165,
+          "target_chars": 125
+        }
+      ]
+    },
+    {
+      "id": "recommended_next_action",
+      "order": 5,
+      "heading": "Recommended Next Action",
+      "component": "callout",
+      "source": "recommended_next_action",
+      "max_chars": 320,
+      "placeholder": "[RECOMMENDED NEXT ACTION — the single most important outreach step; ends with the outreach-approval caveat when outreach consent is not recorded]"
+    },
+    {
+      "id": "data_quality",
+      "order": 6,
+      "heading": "Data Quality",
+      "component": "bullet_list",
+      "source": "data_gaps",
+      "max_items": 4,
+      "max_chars": 150,
+      "empty_text": "No material data gaps identified.",
+      "exclude": "The synthetic-data line (already shown in the header).",
+      "fields": [
+        { "key": "gap_1", "placeholder": "[DATA GAP — missing company fields that change stage or check-size fit]" },
+        { "key": "gap_2", "placeholder": "[DATA GAP — values inferred rather than stated in the deck]" },
+        { "key": "gap_3", "placeholder": "[DATA GAP — ranked investors resting on moderate or weaker evidence]" },
+        { "key": "gap_4", "placeholder": "[DATA GAP — investors removed by hard filters]" }
+      ]
+    }
+  ],
+
+  "footer": {
+    "layout": "[DOCUMENT TITLE]   [PAGE #]   Compiled on [DATE] by TEN Capital Network   [TEN CAPITAL LOGO]",
+    "title_text": "TEN Capital — Investor Matching Report",
+    "compiled_pattern": "Compiled on {date} by {organization}",
+    "compiled_placeholder": "Compiled on [MONTH D, YYYY] by TEN Capital Network",
+    "confidentiality": "Confidential – for recipients only.",
+    "font_pt": 7,
+    "alignment": "center",
+    "rule_above": true,
+    "logo": { "file": "app/assets/TEN_Capital_logo_footer.png", "width_in": 0.67, "height_in": 0.25 }
+  },
+
+  "fitting": {
+    "reduction_order": [
+      "Drop Ideal Investor Profile bullets to 4 and Data Quality notes to 3",
+      "Drop match rows to 7",
+      "Tighten spacing by 15%",
+      "Drop match rows to 6",
+      "Shorten narratives (Why It Fits 105, Concern 65, Outreach Angle 135, snapshot values 70 characters)",
+      "Reduce type to 8.5 pt body / 7.6 pt table",
+      "Last rung: 5 rows, 3 bullets, 2 notes, 8 pt body / 7.2 pt table"
+    ],
+    "recorded_in": "report.content_reductions"
+  },
+
+  "vocabularies": {
+    "stages": ["Pre-Seed", "Seed", "Series A", "Series B", "Series C+", "Growth"],
+    "product_stages": ["Concept / research", "Prototype / MVP", "Pilot / beta", "Commercially available", "Scaling"],
+    "revenue_stages": ["Pre-revenue", "Early revenue (<$1M)", "Revenue ($1M–$10M)", "Scaling revenue ($10M+)"],
+    "sector_families": ["Healthcare & Life Sciences", "Software & Internet", "Climate & Energy", "Industrial & Hardware", "Consumer"],
+    "subsectors": ["Diagnostics", "Medical devices", "Digital health", "Therapeutics / biotech", "Life science tools", "Healthcare services", "Enterprise software", "Fintech", "Cybersecurity", "AI / machine learning", "Edtech", "Proptech", "Energy", "Climate tech", "Agtech & food", "Advanced manufacturing", "Robotics & hardware", "Mobility & logistics", "Aerospace & defense", "Consumer products", "E-commerce & retail"],
+    "business_models": ["SaaS / subscription software", "Subscription", "Marketplace", "Hardware sales", "Device + recurring consumables", "Licensing / royalties", "Services", "Transaction fees", "Direct-to-consumer", "Drug development / partnering", "Reimbursed testing"],
+    "strategic_needs": ["Regulatory expertise", "Clinical validation", "Distribution & channels", "Customer access", "Manufacturing scale-up", "Go-to-market", "International expansion", "Follow-on capital", "Technical / R&D", "Recruiting", "Reimbursement strategy", "Partnering / M&A"],
+    "investor_types": ["Angel investor", "Angel group", "Syndicate", "Seed fund", "Micro-VC", "Venture capital fund", "Growth equity fund", "Family office", "Corporate venture capital", "Strategic investor", "Healthcare system", "Pharmaceutical company", "Medical-device strategic", "Industrial strategic", "Private equity", "Impact investor", "Government-backed fund", "Sovereign wealth-related investor"],
+    "outreach_priority": ["Tier 1 — Contact Now", "Tier 2 — Strong Target", "Tier 3 — Develop Relationship", "Tier 4 — Conditional Target", "Do Not Target"],
+    "tier_short": ["T1 · Contact now", "T2 · Strong target", "T3 · Develop", "T4 · Conditional", "Do not target"],
+    "confidence": ["High", "Medium", "Low"],
+    "evidence_quality": ["Verified", "Strong", "Moderate", "Inferred", "Unknown"],
+    "provenance": ["Pitch deck", "User supplied", "External data", "Analyst inference", "Missing"]
+  },
+
+  "analysis_fields": {
+    "description": "Every report is generated from these analyzed fields. The PDF shows a subset; the JSON record carries all of them.",
+    "company_fields": [
+      { "key": "name", "label": "Company name", "type": "text", "ranking_impact": 1 },
+      { "key": "website", "label": "Website", "type": "text", "ranking_impact": 0 },
+      { "key": "headquarters", "label": "Headquarters", "type": "text", "ranking_impact": 2 },
+      { "key": "sector", "label": "Sector", "type": "text", "ranking_impact": 0 },
+      { "key": "subsector", "label": "Subsector", "type": "subsector", "ranking_impact": 3 },
+      { "key": "business_model", "label": "Business model", "type": "business_model", "ranking_impact": 2 },
+      { "key": "business_model_description", "label": "Business model (as described)", "type": "text", "ranking_impact": 0 },
+      { "key": "company_stage", "label": "Company stage", "type": "stage", "ranking_impact": 3 },
+      { "key": "product_stage", "label": "Product stage", "type": "product_stage", "ranking_impact": 1 },
+      { "key": "revenue_stage", "label": "Revenue stage", "type": "revenue_stage", "ranking_impact": 2 },
+      { "key": "revenue", "label": "Revenue (annual, USD)", "type": "money", "ranking_impact": 2 },
+      { "key": "revenue_growth", "label": "Revenue growth (%)", "type": "percent", "ranking_impact": 1 },
+      { "key": "customers", "label": "Customers / pilots", "type": "text", "ranking_impact": 1 },
+      { "key": "customer_count", "label": "Customer / site count", "type": "int", "ranking_impact": 0 },
+      { "key": "traction", "label": "Traction summary", "type": "text", "ranking_impact": 1 },
+      { "key": "market_size", "label": "Market size (TAM, USD)", "type": "money", "ranking_impact": 0 },
+      { "key": "round_type", "label": "Round", "type": "text", "ranking_impact": 1 },
+      { "key": "raise_amount", "label": "Amount being raised (USD)", "type": "money", "ranking_impact": 3 },
+      { "key": "amount_raised", "label": "Capital raised to date (USD)", "type": "money", "ranking_impact": 1 },
+      { "key": "round_committed", "label": "Committed in this round (USD)", "type": "money", "ranking_impact": 1 },
+      { "key": "valuation", "label": "Valuation (USD)", "type": "money", "ranking_impact": 1 },
+      { "key": "valuation_type", "label": "Valuation basis (pre/post/cap)", "type": "text", "ranking_impact": 0 },
+      { "key": "use_of_funds", "label": "Use of funds", "type": "list", "ranking_impact": 1 },
+      { "key": "strategic_needs", "label": "Strategic needs", "type": "strategic", "ranking_impact": 1 },
+      { "key": "regulatory_status", "label": "Regulatory status", "type": "text", "ranking_impact": 1 },
+      { "key": "intellectual_property", "label": "Intellectual property", "type": "text", "ranking_impact": 0 },
+      { "key": "existing_investors", "label": "Existing investors", "type": "list", "ranking_impact": 1 },
+      { "key": "lead_investor", "label": "Lead investor (this round)", "type": "text", "ranking_impact": 2 },
+      { "key": "seeking_lead", "label": "Seeking a lead investor", "type": "bool", "ranking_impact": 1 },
+      { "key": "competitors", "label": "Named competitors", "type": "list", "ranking_impact": 1 },
+      { "key": "partnerships", "label": "Partnerships", "type": "text", "ranking_impact": 0 }
+    ],
+    "provenance_attributes": ["value", "source", "location", "confidence", "method", "note"],
+    "scoring_criteria": [
+      { "key": "stage", "label": "Stage fit", "default_weight": 15, "rule": "Same stage 100 · one round away 60 · further 0" },
+      { "key": "sector", "label": "Sector/subsector fit", "default_weight": 20, "rule": "Exact subsector 100 · same family 75 · sibling subsector 65 · generalist 50 · none 0" },
+      { "key": "check_size", "label": "Check-size/round fit", "default_weight": 15, "rule": "Overlaps lead band (25–60% of round) 100 · ≥10% 75 · ≥3% 40 · smaller 15 · would take most of the round 60" },
+      { "key": "geography", "label": "Geography fit", "default_weight": 10, "rule": "Same state/region/country 100 · macro region 85 · global 70 · none 0" },
+      { "key": "business_model", "label": "Business-model fit", "default_weight": 10, "rule": "Stated preference overlaps 100 · no overlap 25" },
+      { "key": "traction", "label": "Traction fit", "default_weight": 10, "rule": "Meets revenue bar 100 · one step below 55 (70 with validation) · two below 20" },
+      { "key": "historical_evidence", "label": "Historical investment evidence", "default_weight": 10, "rule": "100 × (1 − 0.5^points) over relevant recorded deals; none recorded 0" },
+      { "key": "strategic_value", "label": "Strategic value", "default_weight": 5, "rule": "40 + 30 per capability matching a company need (max 100) · no match 15" },
+      { "key": "lead_capability", "label": "Lead/follow capability", "default_weight": 5, "rule": "Lead needed: leads 100 · sometimes 60 · follows only 10" }
+    ],
+    "unknown_policy": "A criterion that cannot be judged scores 40 (configurable), is marked known=false, lists its missing information, and contributes zero confidence.",
+    "criterion_fields": ["criterion", "label", "weight", "raw_score", "weighted_score", "evidence", "evidence_source", "evidence_level", "confidence", "missing_information", "known"],
+    "match_fields": ["rank", "investor", "investor_id", "investor_type", "kind", "fit_score", "adjusted_score", "ranking_score", "confidence", "confidence_score", "evidence_quality", "rationale", "investment_evidence", "likely_concerns", "outreach_angle", "required_materials", "outreach_priority", "outreach_priority_key", "priority_reason", "preference_matches", "score_breakdown", "data_source", "is_synthetic", "text_source"],
+    "ideal_investor_profile_fields": ["target_stages", "recommended_categories", "excluded_categories", "sector_specialization", "geographic_fit", "lead_check_range", "follow_check_range", "lead_required", "lead_basis", "strategic_vs_financial", "technical_expertise", "commercialization_expertise", "regulatory_expertise", "cross_border_capability", "follow_on_capacity", "strategic_partnership_potential", "customer_channel_access", "summary_points", "basis"],
+    "required_materials": ["Executive summary", "Pitch deck", "Financial model", "Cap table", "Investment terms", "Regulatory roadmap", "Clinical results", "IP summary", "Customer references", "Technical validation", "Use-of-funds schedule", "Market analysis", "Data room"],
+    "record_sections": ["schema_version", "analysis_id", "timestamp", "user", "source_deck", "company", "company_provenance", "investor_preferences", "match_criteria", "scoring_policy", "ideal_investor_profile", "top_matches", "rejected_investors", "recommended_next_action", "data_gaps", "investor_dataset", "warnings", "consent", "external_processing", "report", "notification"]
+  }
+}
