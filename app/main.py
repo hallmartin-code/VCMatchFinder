@@ -586,40 +586,15 @@ def _render_card(rank: int, match: InvestorMatch, email: SampleEmail, rows: list
 
 
 def _crm_download(label: str, rows: list[dict[str, Any]], company: CompanyProfile, suffix: str, *,
-                  key: str) -> None:
+                  key: str, width: str = "content") -> None:
     data = crm_csv(rows, contacted=st.session_state.contacted, intro_list=st.session_state.intro_list)
     st.download_button(label, data, file_name=f"{company.display_name} {suffix}.csv", mime="text/csv",
-                       on_click="ignore", key=key)
+                       on_click="ignore", key=key, width=width)
 
 
 def render_results(outcome: MatchOutcome, config: MatchingConfig, dataset: InvestorDataset,
                    company: CompanyProfile, settings: Any, sig: str) -> None:
-    try:
-        record, report = _current_report(outcome, config, settings, sig)
-    except MatchingEngineError as exc:
-        st.error(f"The report could not be generated: {exc}")
-        record = report = None
-    if record is not None and report is not None:
-        base = output_basename(record)
-        st.download_button("Download the one-page report (PDF)", report.pdf_bytes, file_name=f"{base}_report.pdf",
-                           mime="application/pdf", type="primary", on_click=_on_download,
-                           args=(sig, record, report.pdf_bytes, settings))
-        if report.reductions:
-            st.caption("To stay on one page: " + "; ".join(report.reductions) + ".")
-        _delivery_status(sig, settings)
-
     rows = outcome.run.top(config.ranking.top_n)
-    named = [m for m in outcome.run.matches if m.outreach_priority != "do_not_target"]
-    tier1 = sum(1 for m in named if m.outreach_priority == "tier_1")
-    top_fit = f"{rows[0].fit_score:.0f}" if rows else "-"
-    theme.tiles([("Named matches", str(len(named)), theme.TOKENS["teal"]),
-                 ("Tier 1 · contact now", str(tier1), theme.TOKENS["amber"]),
-                 ("Removed by filters", str(len(outcome.run.rejected)), theme.TOKENS["coral"]),
-                 ("Top fit score", top_fit, theme.TOKENS["ink_100"])])
-    if dataset.any_synthetic:
-        st.error("These named investors come from a SYNTHETIC test dataset and are fictitious.")
-    st.info(f"**Recommended next action:** {theme.safe_md(outcome.next_action)}")
-
     needs_lead = company.needs_lead(outcome.preferences.lead_required)
     emails: dict[str, SampleEmail] = {}
     crm_rows: dict[str, list[dict[str, Any]]] = {}
@@ -632,15 +607,45 @@ def render_results(outcome: MatchOutcome, config: MatchingConfig, dataset: Inves
         emails[match.investor_id] = draft(inv.primary_contact() if inv else None)
         if match.kind == "investor":  # profiles are not organizations a CRM can hold
             crm_rows[match.investor_id] = contact_rows(match, company, inv, draft)
+    everyone = [row for investor_rows in crm_rows.values() for row in investor_rows]
 
-    if crm_rows:
-        everyone = [row for investor_rows in crm_rows.values() for row in investor_rows]
-        people = sum(1 for row in everyone if row["Person name"] or row["Email"])
-        theme.label(f"Pipedrive export · {people} contacts at {len(crm_rows)} target investors")
+    # The two downloads, stacked: the report, then the Pipedrive spreadsheet.
+    try:
+        record, report = _current_report(outcome, config, settings, sig)
+    except MatchingEngineError as exc:
+        st.error(f"The report could not be generated: {exc}")
+        record = report = None
+    if record is not None and report is not None:
+        base = output_basename(record)
+        st.download_button("Download the one-page report (PDF)", report.pdf_bytes, file_name=f"{base}_report.pdf",
+                           mime="application/pdf", type="primary", on_click=_on_download,
+                           args=(sig, record, report.pdf_bytes, settings), width="stretch")
+    if everyone:
         _crm_download("Download all contacts and emails for Pipedrive (CSV)", everyone, company,
-                      "Pipedrive contacts and emails", key="crm_all")
-        st.caption("One row per contact on the investor list, each with the sample email addressed to that "
-                   "person, plus the investor's fit and priority, ready for Pipedrive's spreadsheet import.")
+                      "Pipedrive contacts and emails", key="crm_all", width="stretch")
+        people = sum(1 for row in everyone if row["Person name"] or row["Email"])
+        if people:
+            st.caption(f"Pipedrive spreadsheet: {people} contacts at {len(crm_rows)} target investors, one row "
+                       "per contact with the sample email addressed to that person.")
+        else:
+            st.caption(f"Pipedrive spreadsheet: {len(crm_rows)} target investors. The investor list has no "
+                       "contacts for them, so each row has blank contact columns and a [First name] placeholder.")
+    if report is not None:
+        if report.reductions:
+            st.caption("To stay on one page: " + "; ".join(report.reductions) + ".")
+        _delivery_status(sig, settings)
+
+    named = [m for m in outcome.run.matches if m.outreach_priority != "do_not_target"]
+    tier1 = sum(1 for m in named if m.outreach_priority == "tier_1")
+    top_fit = f"{rows[0].fit_score:.0f}" if rows else "-"
+    theme.tiles([("Named matches", str(len(named)), theme.TOKENS["teal"]),
+                 ("Tier 1 · contact now", str(tier1), theme.TOKENS["amber"]),
+                 ("Removed by filters", str(len(outcome.run.rejected)), theme.TOKENS["coral"]),
+                 ("Top fit score", top_fit, theme.TOKENS["ink_100"])])
+    if dataset.any_synthetic:
+        st.error("These named investors come from a SYNTHETIC test dataset and are fictitious.")
+    st.info(f"**Recommended next action:** {theme.safe_md(outcome.next_action)}")
+
     intro = st.session_state.intro_list
     if intro:
         theme.label(f"Intro list ({len(intro)})")
