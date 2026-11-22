@@ -49,7 +49,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 BRAND_MARK_PNG = STATIC_DIR / "favicon.png"
 STATIC_URL = "/app/static"
 
-WORKFLOW_STEPS: tuple[str, ...] = ("Upload", "Review", "Preferences", "Matches", "Export")
+WORKFLOW_STEPS: tuple[str, ...] = ("Upload", "Matches", "Report")
 #: Widget key of the deck uploader; Streamlit adds the class ``st-key-<key>`` to its container,
 #: which scopes the dropzone copy to this uploader only.
 DECK_UPLOADER_KEY = "deck_upload"
@@ -111,7 +111,8 @@ h1,h2,h3,h4{{ font-family:{_DISPLAY}; color:var(--ink-100); }}
   box-shadow:0 0 0 3px rgba(53,190,187,.18);
 }}
 .tc-h1{{ font-family:{_DISPLAY}; font-size:28px; font-weight:700; line-height:1.25;
-  margin:0 0 12px; letter-spacing:-.01em; color:var(--ink-100); }}
+  margin:0 0 12px; letter-spacing:-.01em; color:var(--ink-100);
+  word-break:normal; overflow-wrap:normal; hyphens:none; -webkit-hyphens:none; }}
 .tc-h1 .arrow{{ color:var(--ink-500); font-weight:400; margin:0 4px; }}
 .tc-h1 .to, .tc-h2 .to{{
   background:linear-gradient(90deg,var(--coral-soft),var(--amber));
@@ -247,11 +248,54 @@ hr{{ border-color:var(--navy-700); }}
 .tc-footer{{ text-align:center; margin-top:22px; font-family:{_MONO}; font-size:11px;
   letter-spacing:.08em; color:var(--ink-600); text-transform:uppercase; }}
 
+/* ---- analysis progress ----------------------------------------------------- */
+.tc-progress{{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:6px 0 4px;
+  font-family:{_DISPLAY}; font-size:13.5px; font-weight:600; color:var(--ink-600); }}
+.tc-progress .s.done{{ color:var(--teal); }}
+.tc-progress .s.now{{ color:var(--ink-100); }}
+.tc-progress .s.now::after{{ content:"…"; color:var(--amber); }}
+.tc-progress .sep{{ color:var(--ink-600); font-weight:400; }}
+
+/* ---- landing helpers --------------------------------------------------------- */
+.tc-hint{{ font-size:13px; color:var(--ink-500); margin:-2px 0 0; text-align:center; }}
+.tc-hint.ok{{ color:var(--teal); }}
+.tc-oneline{{ margin-top:16px; padding-top:14px; border-top:1px solid var(--navy-700);
+  font-size:12.5px; line-height:1.6; color:var(--ink-500); }}
+
+/* ---- company facts ------------------------------------------------------------ */
+.tc-missing{{ font-size:13px; color:var(--amber); margin:6px 0 -6px; }}
+
+/* ---- match cards ---------------------------------------------------------------- */
+[class*="st-key-tc-match-"]{{ background:rgba(255,255,255,.02); border-color:var(--navy-700) !important;
+  border-radius:14px !important; }}
+.tc-card-head{{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; flex-wrap:wrap; }}
+.tc-card-name{{ font-family:{_DISPLAY}; font-weight:700; font-size:16.5px; color:var(--ink-100); line-height:1.35; }}
+.tc-card-name .rank{{ color:var(--ink-500); font-weight:600; margin-right:6px; }}
+.tc-card-meta{{ font-size:12.5px; color:var(--ink-500); margin-top:2px; }}
+.tc-badges{{ display:flex; gap:6px; flex-wrap:wrap; }}
+.tc-badge{{ font-family:{_MONO}; font-size:10.5px; letter-spacing:.05em; padding:3px 9px; border-radius:999px;
+  border:1px solid currentColor; white-space:nowrap; }}
+.tc-why{{ color:var(--ink-300); font-size:14px; line-height:1.55; margin:8px 0 4px; }}
+.tc-concern{{ color:var(--ink-500); font-size:13px; line-height:1.5; margin:0; }}
+.tc-concern b{{ color:var(--coral-soft); font-weight:600; }}
+.tc-copy{{ width:100%; border-radius:12px; border:1px solid var(--navy-700); background:rgba(255,255,255,.02);
+  color:var(--ink-300); font-family:{_DISPLAY}; font-weight:600; font-size:14px; padding:10px 14px; cursor:pointer; }}
+.tc-copy:hover{{ border-color:var(--teal); color:var(--ink-100); }}
+
+/* Streamlit's own markdown heading sizes outrank a plain class, so pin ours. */
+[data-testid="stMarkdownContainer"] h1.tc-h1{{ font-size:28px !important; line-height:1.25 !important; padding:0 !important; }}
+[data-testid="stMarkdownContainer"] h2.tc-h2{{ font-size:20px !important; line-height:1.3 !important; padding:0 !important; }}
+/* the one download in the workspace is the primary action: style it like one */
+[data-testid="stDownloadButton"] [data-testid="stBaseButton-primary"]{{
+  background:linear-gradient(90deg,var(--coral) 0%,var(--coral-soft) 45%,var(--amber) 100%) !important;
+  border:none !important; color:#17130E !important;
+}}
+
 /* keyboard users must always see where they are */
 :focus-visible{{ outline:2px solid var(--teal) !important; outline-offset:2px; }}
 @media (max-width:560px){{
   [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] > [data-testid="stMarkdown"] .tc-card-marker){{ padding:30px 22px 24px; }}
-  .tc-h1{{ font-size:23px; }}
+  [data-testid="stMarkdownContainer"] h1.tc-h1{{ font-size:23px !important; }}
 }}
 </style>
 """
@@ -281,7 +325,7 @@ def _css_string(text: str) -> str:
 def inject(*, wide: bool = False, upload_hint: str = "") -> None:
     """Apply the design system. Safe to call on every rerun."""
     st.markdown(_HEAD_LINKS + _CSS, unsafe_allow_html=True)
-    hint = _css_string(upload_hint or "Click to choose a deck")
+    hint = _css_string(upload_hint or "Drag and drop your deck here, or click to browse")
     extra = (f'.st-key-{DECK_UPLOADER_KEY} [data-testid="stFileUploaderDropzoneInstructions"] > div::after'
              f'{{content:"{hint}";}}')
     if wide:
@@ -309,13 +353,13 @@ def card(eyebrow: str, heading_html: str, lede: str | None = None) -> Iterator[N
 
 
 @contextmanager
-def panel(step: int, title: str, subtitle: str | None = None, *, active: bool = False) -> Iterator[None]:
-    """A workspace panel for one workflow step."""
+def panel(eyebrow: str, title: str, subtitle: str | None = None, *, active: bool = False) -> Iterator[None]:
+    """A workspace panel."""
     with st.container():
         sub = f'<p class="tc-sub">{escape(subtitle)}</p>' if subtitle else ""
         state = " is-active" if active else ""
         st.markdown(f'<div class="tc-panel-marker{state}"></div>'
-                    f'<div class="tc-eyebrow">Step {step} · {escape(WORKFLOW_STEPS[step - 1])}</div>'
+                    f'<div class="tc-eyebrow">{escape(eyebrow)}</div>'
                     f'<h2 class="tc-h2">{escape(title)}</h2>{sub}', unsafe_allow_html=True)
         yield
 
@@ -357,3 +401,57 @@ def disclosure(paragraphs_html: Iterable[str]) -> None:
 
 def footer(text: str = "Powered by TEN Capital Network") -> None:
     st.markdown(f'<div class="tc-footer">{escape(text)}</div>', unsafe_allow_html=True)
+
+
+# Streamlit draws icons as ligature text ("upload", "keyboard_arrow_right") that a screen
+# reader would announce, and has no option to hide them; this marks each one aria-hidden.
+# It also wires the copy buttons, which need the page's clipboard (no Streamlit API).
+_PAGE_SCRIPT = """
+<script>
+(() => {
+  if (window.__tcPageScript) return;
+  window.__tcPageScript = true;
+  const hide = (root) => root.querySelectorAll('[data-testid="stIconMaterial"]:not([aria-hidden])')
+    .forEach((el) => el.setAttribute('aria-hidden', 'true'));
+  hide(document);
+  new MutationObserver(() => hide(document)).observe(document.body, {childList: true, subtree: true});
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('.tc-copy');
+    if (!button) return;
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy || '');
+      button.textContent = 'Copied \u2713';
+    } catch (_err) {
+      button.textContent = 'Copy failed - select the text in See scoring';
+    }
+    setTimeout(() => { button.textContent = button.dataset.label; }, 2000);
+  });
+})();
+</script>
+"""
+
+
+def page_script() -> None:
+    """Install the accessibility and copy-button script (once per page)."""
+    st.html(_PAGE_SCRIPT, unsafe_allow_javascript=True)
+
+
+def progress_html(stages: list[str], current: int) -> str:
+    """The analysis stages as one line; stages before ``current`` show as done."""
+    parts = []
+    for index, text in enumerate(stages):
+        state = "done" if index < current else ("now" if index == current else "")
+        mark = "✓ " if state == "done" else ""
+        parts.append(f'<span class="s {state}">{mark}{escape(text)}</span>')
+    arrow = '<span class="sep" aria-hidden="true">→</span>'
+    return f'<div class="tc-progress" role="status" aria-live="polite">{arrow.join(parts)}</div>'
+
+
+def badge(text: str, color: str) -> str:
+    return f'<span class="tc-badge" style="color:{color}">{escape(text)}</span>'
+
+
+def copy_button(label_text: str, text: str) -> None:
+    """A button that copies ``text`` to the clipboard (wired by page_script)."""
+    st.markdown(f'<button type="button" class="tc-copy" data-label="{escape(label_text)}" '
+                f'data-copy="{escape(text)}">{escape(label_text)}</button>', unsafe_allow_html=True)

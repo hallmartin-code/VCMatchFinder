@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 
 # ---------------------------------------------------------------------------- stages
 
@@ -260,36 +261,49 @@ def parse_sector_tokens(value: str | Iterable[str] | None) -> set[str]:
         return set()
     items = [value] if isinstance(value, str) else list(value)
     tokens: set[str] = set()
-    subsector_aliases = sorted(
+    for raw in items:
+        tokens |= _sector_tokens(str(raw))
+    return tokens
+
+
+@lru_cache(maxsize=1)
+def _subsector_aliases() -> tuple[tuple[str, str], ...]:
+    """(normalized alias, subsector key), longest alias first."""
+    ordered = sorted(
         ((alias, key) for key, sub in SUBSECTORS.items() for alias in (key, *sub.aliases)),
         key=lambda pair: -len(pair[0]),
     )
-    for raw in items:
-        for part in re.split(r"[,;|\n]", str(raw)):
-            item = _norm(part.replace("_", " "))
-            if not item:
-                continue
-            if item.replace(" ", "_") in SUBSECTORS:
-                tokens.add(f"sub:{item.replace(' ', '_')}")
-                continue
-            if item in SECTOR_FAMILIES:
-                tokens.add(f"fam:{item}")
-                continue
-            matched = False
-            remaining = item
-            for alias, key in subsector_aliases:
-                alias_n = _norm(alias.replace("_", " "))
-                if _contains_phrase(remaining, alias_n):
-                    tokens.add(f"sub:{key}")
-                    remaining = remaining.replace(alias_n, " ")
-                    matched = True
-            for family, aliases in FAMILY_ALIASES.items():
-                if any(_contains_phrase(remaining, a) for a in aliases):
-                    tokens.add(f"fam:{family}")
-                    matched = True
-            if not matched and any(_contains_phrase(item, a) for a in GENERALIST_ALIASES):
-                tokens.add("generalist")
-    return tokens
+    return tuple((_norm(alias.replace("_", " ")), key) for alias, key in ordered)
+
+
+# A 20,000-investor list repeats the same few hundred sector strings; parse each once.
+@lru_cache(maxsize=65536)
+def _sector_tokens(raw: str) -> frozenset[str]:
+    tokens: set[str] = set()
+    for part in re.split(r"[,;|\n]", raw):
+        item = _norm(part.replace("_", " "))
+        if not item:
+            continue
+        if item.replace(" ", "_") in SUBSECTORS:
+            tokens.add(f"sub:{item.replace(' ', '_')}")
+            continue
+        if item in SECTOR_FAMILIES:
+            tokens.add(f"fam:{item}")
+            continue
+        matched = False
+        remaining = item
+        for alias_n, key in _subsector_aliases():
+            if _contains_phrase(remaining, alias_n):
+                tokens.add(f"sub:{key}")
+                remaining = remaining.replace(alias_n, " ")
+                matched = True
+        for family, aliases in FAMILY_ALIASES.items():
+            if any(_contains_phrase(remaining, a) for a in aliases):
+                tokens.add(f"fam:{family}")
+                matched = True
+        if not matched and any(_contains_phrase(item, a) for a in GENERALIST_ALIASES):
+            tokens.add("generalist")
+    return frozenset(tokens)
 
 
 def describe_sector_tokens(tokens: Iterable[str]) -> str:

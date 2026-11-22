@@ -104,8 +104,8 @@ def test_landing_asks_no_consent_questions(monkeypatch):
     assert not app.checkbox                      # no consent controls in the sidebar either
 
 
-def test_streamlit_review_match_and_export_flow(samples, settings, tmp_path, monkeypatch):
-    """Drive the post-upload screens with a real analyzed deck (AppTest cannot upload files)."""
+def test_streamlit_workspace_shows_matches_and_rescores(samples, settings, tmp_path, monkeypatch):
+    """Drive the post-upload workspace with a real analyzed deck (AppTest cannot upload files)."""
     from conftest import ROOT
     from streamlit.testing.v1 import AppTest
 
@@ -118,16 +118,39 @@ def test_streamlit_review_match_and_export_flow(samples, settings, tmp_path, mon
     app.session_state["company"] = session.company
     app.session_state["analysis_id"] = "00000000-test-analysis"
     app.run()
-    assert "c_analysis" not in app.session_state
     assert not app.exception
 
-    next(b for b in app.button if b.label == "Run matching").click().run()
-    assert not app.exception
-    assert any("Aldermoor Health Ventures" in e.label for e in app.expander)
+    # Matches, cards and the report are there without any further click.
+    text = "\n".join(m.value for m in app.markdown)
+    assert "Aldermoor Health Ventures" in text and "Top concern:" in text
     assert any("SYNTHETIC" in e.value for e in app.error)
-
-    next(b for b in app.button if b.label == "Generate PDF").click().run()
-    assert not app.exception
-    assert app.session_state["pdf"] is not None
-    json_path, pdf_path = app.session_state["saved"]
+    labels = {b.label for b in app.button}
+    assert not labels & {"Apply corrections", "Looks right — continue", "Run matching", "Generate PDF"}
+    assert app.session_state["report_cache"] is not None
+    # The first version is saved for TEN in the background.
+    [holder] = app.session_state["deliveries"].values()
+    holder["thread"].join(10)
+    json_path, pdf_path = holder["saved"]
     assert json_path.parent == tmp_path and pdf_path.exists()
+
+    # Key facts are dropdowns; changing one re-scores straight away.
+    first = app.session_state["outcome_sig"]
+    app.selectbox(key="fact_company_stage").set_value("seed").run()
+    assert not app.exception
+    assert app.session_state["outcome_sig"] != first
+    assert app.session_state["outcome"].company.company_stage.value == "seed"
+    assert app.session_state["outcome"].company.company_stage.source == "user_supplied"
+
+    # Card actions: intro list (exportable for Pipedrive), contacted, exclude.
+    top = app.session_state["outcome"].run.top(8)[0]
+    app.button(key=f"intro_{top.investor_id}").click().run()
+    app.button(key=f"contacted_{top.investor_id}").click().run()
+    assert not app.exception
+    assert list(app.session_state["intro_list"]) == [top.investor_id]
+    assert app.session_state["contacted"] == [top.investor_id]
+    text = "\n".join(m.value for m in app.markdown)
+    assert "Intro list (1)" in text and "Already contacted" in text
+    app.button(key=f"exclude_{top.investor_id}").click().run()
+    assert not app.exception
+    assert top.investor_name in app.session_state["outcome"].preferences.excluded_investors
+    assert all(m.investor_id != top.investor_id for m in app.session_state["outcome"].run.top(8))

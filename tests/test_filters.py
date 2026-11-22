@@ -73,3 +73,11 @@ def test_rejections_keep_all_reasons(lumora_company, dataset):
     assert by_name["Marrow & Pine Ventures"] == {"portfolio_conflict"}
     assert by_name["Solenne European Health Fund"] == {"geography_restriction"}
     assert len(viable) + len(rejected) == len(dataset.investors)
+
+
+def test_west_virginia_is_not_virginia():
+    from app.utils.geography import parse_geo_tokens, resolve_location
+
+    assert resolve_location("West Virginia, United States").subdivision == "US-WV"
+    assert "US-VA" not in parse_geo_tokens("Morgantown, West Virginia")
+    assert {"US-VA", "US-WV"} <= parse_geo_tokens("Virginia and West Virginia")

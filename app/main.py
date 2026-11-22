@@ -1,11 +1,13 @@
-"""Streamlit UI in the TEN Capital design: Upload -> Review -> Preferences -> Matches -> Export.
+"""Streamlit UI in the TEN Capital design: upload a deck, then work with the matches.
 
 Run from the project root:
 
     streamlit run app/main.py
 
-The landing page is the design's centered upload card. Once a deck is analyzed the app
-switches to a wide workspace with a step indicator and one panel per step. All styling
+The landing page is the design's centered upload card. Analyzing a deck reads it, extracts
+the facts and scores the investor list in one go, then switches to a wide workspace: the
+key company facts on the left (editing one re-scores), the ranked match cards on the right,
+and a single download for the one-page report, which is rebuilt automatically. All styling
 lives in app/ui/theme.py.
 """
 
@@ -22,6 +24,8 @@ sys.path[:] = [p for p in sys.path if p and Path(p).resolve() != _APP_DIR]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+import json  # noqa: E402
+import threading  # noqa: E402
 import uuid  # noqa: E402
 from datetime import date  # noqa: E402
 from html import escape  # noqa: E402
@@ -32,12 +36,19 @@ import streamlit as st  # noqa: E402
 
 from app.config import CRITERIA, MatchingConfig, get_settings  # noqa: E402
 from app.errors import ConfigError, MatchingEngineError  # noqa: E402
-from app.extraction.company_extractor import manual_entry_fields  # noqa: E402
-from app.matching.taxonomy import INVESTOR_TYPES, STAGE_LABELS, SUBSECTORS  # noqa: E402
+from app.matching.taxonomy import (  # noqa: E402
+    BUSINESS_MODELS,
+    INVESTOR_TYPES,
+    STAGE_LABELS,
+    STAGES,
+    SUBSECTORS,
+    family_label,
+)
 from app.models.company import FIELD_SPECS, CompanyProfile, InvestorPreferences  # noqa: E402
 from app.models.match import EVIDENCE_LABELS, TIER_LABELS, InvestorMatch  # noqa: E402
 from app.models.record import UserInfo  # noqa: E402
 from app.pipeline import (  # noqa: E402
+    MatchOutcome,
     analyze_deck,
     build_record,
     generate_report,
@@ -54,18 +65,31 @@ from app.services.investor_data_service import (  # noqa: E402
 )
 from app.services.llm_service import LLMService  # noqa: E402
 from app.ui import theme  # noqa: E402
+from app.utils.geography import COUNTRIES, US_STATES  # noqa: E402
+from app.utils.money import parse_money  # noqa: E402
 from app.utils.provenance import SOURCE_LABELS  # noqa: E402
 
 _TYPE_KEYS = [k for k in INVESTOR_TYPES if k != "unknown"]
 _UPLOAD_TYPES = ["pdf", "pptx", "ppt"]
 _MISSING_MARK = "Not in deck"
-_ANALYSIS_KEYS = ("session", "company", "outcome", "record", "pdf", "report", "saved", "notification",
-                  "analysis_id", "user_info")
+#: The facts that drive matching most, shown up front; every other field sits behind "Show all fields".
+_KEY_FIELDS: dict[str, str] = {
+    "company_stage": "Stage",
+    "subsector": "Sector",
+    "raise_amount": "Raise amount",
+    "headquarters": "Geography",
+    "traction": "Traction",
+    "business_model": "Business model",
+}
+_FACT_PREFIX = "fact_"
+_TIER_COLORS = {"tier_1": theme.TOKENS["amber"], "tier_2": theme.TOKENS["teal"], "tier_3": theme.TOKENS["ink_300"],
+                "tier_4": theme.TOKENS["ink_500"], "do_not_target": theme.TOKENS["coral"]}
+_ANALYSIS_KEYS = ("session", "company", "outcome", "outcome_sig", "report_cache", "analysis_id", "user_info")
 
 
 def _init_state() -> None:
     defaults: dict[str, Any] = {key: None for key in _ANALYSIS_KEYS}
-    defaults.update(excluded_extra=[], run_requested=False, reviewed=False)
+    defaults.update(excluded_extra=[], contacted=[], intro_list={}, deliveries={}, downloaded=False)
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
@@ -73,8 +97,9 @@ def _init_state() -> None:
 def _reset_analysis() -> None:
     for key in _ANALYSIS_KEYS:
         st.session_state[key] = None
-    st.session_state.excluded_extra = []
-    st.session_state.reviewed = False
+    st.session_state.update(excluded_extra=[], contacted=[], intro_list={}, deliveries={}, downloaded=False)
+    for key in [k for k in st.session_state if str(k).startswith(_FACT_PREFIX)]:
+        del st.session_state[key]
     st.session_state.pop("editor", None)
 
 
@@ -96,6 +121,11 @@ def _page_icon() -> Any:
         return "◆"
 
 
+def _h(text: str | None) -> str:
+    """Escape data for an HTML snippet in st.markdown (a pair of ``$`` would otherwise render as LaTeX)."""
+    return escape(text or "").replace("$", "&#36;")
+
+
 def _disclosures(settings: Any, llm: LLMService) -> list[str]:
     """What happens to the deck, stated from live settings so it can never drift."""
     items = [
@@ -112,6 +142,10 @@ def _disclosures(settings: Any, llm: LLMService) -> list[str]:
                      "to extract facts and draft match explanations. Scores are always computed by the engine.")
     items.append("Recommendations are for human review. This app never contacts investors.")
     return items
+
+
+def _file_size(size: int) -> str:
+    return f"{size / 1_000_000:.1f} MB" if size >= 1_000_000 else f"{max(size // 1000, 1)} KB"
 
 
 # --------------------------------------------------------------------------- sidebar
@@ -147,102 +181,7 @@ def render_sidebar(base: MatchingConfig, llm: LLMService, settings: Any) -> Matc
         return base
 
 
-# ---------------------------------------------------------------------- landing (step 1)
-
-
-def render_landing(settings: Any, llm: LLMService) -> None:
-    st.markdown(theme.brand_lockup(), unsafe_allow_html=True)
-    with theme.card(
-        "Investor Matching Engine",
-        'Pitch Deck<span class="arrow">&rarr;</span><span class="to">Ranked Investor Matches</span>',
-        lede="Upload a pitch deck and get a ranked, explained list of the investors most likely to fund "
-             "the company now, delivered as a one-page TEN Capital report.",
-    ):
-        upload = st.file_uploader("Pitch deck (PDF, PPTX or PPT)", type=_UPLOAD_TYPES,
-                                  accept_multiple_files=False, label_visibility="collapsed",
-                                  key=theme.DECK_UPLOADER_KEY)
-        with st.expander("Add context and your details (optional)"):
-            st.text_area("Additional company information", key="notes",
-                         help="Treated as user-supplied information and preferred over deck text.")
-            st.text_input("Your name", key="u_name")
-            st.text_input("Your email", key="u_email")
-            st.text_input("Organization", key="u_org")
-
-        if st.button("Analyze deck", type="primary", disabled=upload is None):
-            try:
-                with st.spinner("Reading the deck and extracting company information..."):
-                    session = analyze_deck(settings=settings,
-                                           upload=(upload.name, upload.getvalue()),
-                                           notes_text=st.session_state.get("notes", ""), llm=llm)
-            except MatchingEngineError as exc:
-                st.error(str(exc))
-            else:
-                user = _user()
-                _reset_analysis()
-                st.session_state.update(session=session, company=session.company,
-                                        analysis_id=str(uuid.uuid4()), user_info=user)
-                st.rerun()
-        theme.disclosure(_disclosures(settings, llm))
-    theme.footer()
-
-
-# ---------------------------------------------------------------------------- step 2
-
-
-def _editor_frame(company: CompanyProfile) -> pd.DataFrame:
-    manual = set(manual_entry_fields(company))
-    rows = []
-    for name, spec in FIELD_SPECS.items():
-        if not spec.reviewable:
-            continue
-        item = company.field(name)
-        source = SOURCE_LABELS[item.source] if item.known else "Missing"
-        if name in manual:
-            source = "Missing - enter manually"
-        rows.append({"key": name, "Field": spec.label, "Value": company.display_value(name),
-                     "Source": source, "Location": item.location or "", "Confidence": round(item.confidence, 2)})
-    return pd.DataFrame(rows)
-
-
-def render_review(*, active: bool) -> None:
-    session = st.session_state.session
-    company: CompanyProfile = st.session_state.company
-    ex = session.extraction
-    subtitle = (f"{ex.deck_filename} · {ex.deck_format.upper()} · {ex.deck_pages} pages/slides"
-                + (" · scanned" if ex.deck_scanned else "")
-                + ". Edit any Value; corrected fields are labeled user-supplied.")
-    with theme.panel(2, "Review and correct the extracted data", subtitle, active=active):
-        for warning in ex.warnings:
-            st.warning(theme.safe_md(warning))
-        frame = _editor_frame(company)
-        edited = st.data_editor(
-            frame, key="editor", hide_index=True,
-            disabled=["Field", "Source", "Location", "Confidence"],
-            column_config={"key": None, "Confidence": st.column_config.NumberColumn(format="%.2f")},
-        )
-        st.caption("Stages: " + ", ".join(STAGE_LABELS.values())
-                   + ". Subsectors: " + ", ".join(s.label for s in SUBSECTORS.values()) + ".")
-        apply_col, confirm_col, _spacer = st.columns([1, 1.3, 2.7])
-        if apply_col.button("Apply corrections"):
-            overrides: dict[str, Any] = {}
-            for (_i, before), (_j, after) in zip(frame.iterrows(), edited.iterrows(), strict=True):
-                new = str(after["Value"]).strip()
-                if new and new != str(before["Value"]).strip() and new != _MISSING_MARK:
-                    overrides[before["key"]] = new
-            if overrides:
-                st.session_state.company = company.apply_overrides(overrides)
-                st.session_state.outcome = None
-                st.session_state.reviewed = True
-                st.toast(f"Applied {len(overrides)} correction(s).")
-                st.rerun()
-            else:
-                st.info("No changes detected.")
-        if confirm_col.button("Looks right — continue"):
-            st.session_state.reviewed = True
-            st.rerun()
-
-
-# ---------------------------------------------------------------------------- step 3
+# ---------------------------------------------------------------------- investor data
 
 
 @st.cache_resource(show_spinner="Loading the investor list...")
@@ -258,40 +197,207 @@ def _configured_dataset(settings: Any) -> InvestorDataset:
     return _cached_dataset(signature)
 
 
-def render_preferences(settings: Any, *, active: bool) -> tuple[InvestorPreferences, InvestorDataset]:
-    with theme.panel(3, "Investor preferences and data",
-                     "Optional targeting. Exclusions become hard filters; preferences add a small, "
-                     "visible ranking bonus.", active=active):
-        label = lambda key: INVESTOR_TYPES[key]  # noqa: E731
-        col1, col2 = st.columns(2)
-        with col1:
-            preferred = st.multiselect("Preferred investor types", _TYPE_KEYS, format_func=label, key="p_pref")
-            excluded = st.multiselect("Excluded investor types", _TYPE_KEYS, format_func=label, key="p_excl")
-            lead = st.radio("Lead investor required?", ["Auto (from deck)", "Yes", "No"], horizontal=True,
-                            key="p_lead")
-        with col2:
-            geos = st.text_input("Preferred geographies (comma-separated)", key="p_geo")
-            use_default = st.checkbox("Include the configured investor dataset", value=True, key="p_default")
-            uploads = st.file_uploader("Additional investor datasets (CSV/JSON)", type=["csv", "json"],
-                                       accept_multiple_files=True, key="p_uploads")
-        if uploads:
-            dataset = load_default_dataset(settings, [(f.name, f.getvalue()) for f in uploads],
-                                           include_defaults=use_default)
-        elif use_default:
-            dataset = _configured_dataset(settings)
+# ---------------------------------------------------------------------------- landing
+
+_STAGE_INDEX = {"reading": 0, "extracting": 1, "scoring": 2, "explaining": 3}
+
+
+def render_landing(settings: Any, llm: LLMService, base_config: MatchingConfig) -> None:
+    st.markdown(theme.brand_lockup(), unsafe_allow_html=True)
+    with theme.card(
+        "Investor Matching Engine",
+        'Pitch Deck<span class="arrow" aria-hidden="true">&rarr;</span><span class="to">Ranked Investor Matches</span>',
+        lede="Upload a pitch deck and get a ranked, explained list of the investors most likely to fund "
+             "the company now, delivered as a one-page TEN Capital report.",
+    ):
+        upload = st.file_uploader("Pitch deck (PDF, PPTX or PPT)", type=_UPLOAD_TYPES,
+                                  accept_multiple_files=False, label_visibility="collapsed",
+                                  key=theme.DECK_UPLOADER_KEY)
+        with st.expander("Add context and your details (optional)"):
+            st.text_area("Additional company information", key="notes",
+                         placeholder="Anything not in the deck: current commitments, lead investor, "
+                                     "updated traction…")
+            st.text_input("Your name", key="u_name")
+            st.text_input("Your email", key="u_email")
+            st.text_input("Organization", key="u_org")
+
+        clicked = st.button("Analyze deck", type="primary", disabled=upload is None)
+        if upload is None:
+            st.markdown('<p class="tc-hint">Choose a deck to continue.</p>', unsafe_allow_html=True)
         else:
-            dataset = load_default_dataset(settings, [], include_defaults=False)
-        st.caption(f"Investor data: {dataset.label()} · {len(dataset.investors):,} records")
-        for warning in dataset.warnings:
-            (st.error if "SYNTHETIC" in warning else st.caption)(theme.safe_md(warning))
-        excluded_names = st.multiselect("Excluded investors", sorted({i.name for i in dataset.investors}),
-                                        key="p_excl_names")
-        extra = st.session_state.excluded_extra
-        if extra:
-            st.caption("Excluded from match review: " + ", ".join(extra))
-            if st.button("Clear review exclusions"):
-                st.session_state.excluded_extra = []
-                st.rerun()
+            st.markdown(f'<p class="tc-hint ok">&#10003; {_h(upload.name)} · {_file_size(upload.size)} — ready to '
+                        "analyze</p>", unsafe_allow_html=True)
+        if clicked and upload is not None:
+            _analyze(settings, llm, base_config, upload)
+        st.markdown("<p class=\"tc-oneline\">Your deck is deleted after reading; reports are saved for TEN's "
+                    "review.</p>", unsafe_allow_html=True)
+        with st.expander("How it works"):
+            theme.disclosure(_disclosures(settings, llm))
+    theme.footer()
+
+
+def _analyze(settings: Any, llm: LLMService, base_config: MatchingConfig, upload: Any) -> None:
+    """Read the deck, extract the facts and score the investor list, showing each stage."""
+    dataset = _configured_dataset(settings)
+    stages = ["Reading slides", "Extracting facts", f"Scoring {len(dataset.investors):,} investors",
+              "Writing explanations"]
+    slot = st.empty()
+
+    def progress(stage: str) -> None:
+        slot.markdown(theme.progress_html(stages, _STAGE_INDEX[stage]), unsafe_allow_html=True)
+
+    try:
+        session = analyze_deck(settings=settings, upload=(upload.name, upload.getvalue()),
+                               notes_text=st.session_state.get("notes", ""), llm=llm, progress=progress)
+        outcome = run_matching(session.company, InvestorPreferences(), dataset, base_config, llm=llm,
+                               deck_scanned=session.extraction.deck_scanned, progress=progress)
+    except MatchingEngineError as exc:
+        slot.empty()
+        st.error(str(exc))
+        return
+    slot.markdown(theme.progress_html(stages, len(stages)), unsafe_allow_html=True)
+    user = _user()
+    _reset_analysis()
+    # outcome_sig stays None: the workspace adopts this outcome for its first set of inputs.
+    st.session_state.update(session=session, company=session.company, outcome=outcome,
+                            analysis_id=str(uuid.uuid4()), user_info=user)
+    st.rerun()
+
+
+# ------------------------------------------------------------------------ company facts
+
+
+def _geo_options() -> list[str]:
+    """US states, then countries: every option resolves to a location the scoring understands."""
+    states = [f"{name.title()}, United States" for name in US_STATES]
+    countries: dict[str, str] = {}
+    for name, (iso, _macro) in COUNTRIES.items():
+        countries.setdefault(iso, name)
+    return states + sorted(name.title() for name in countries.values())
+
+
+def _subsector_label(key: str) -> str:
+    sub = SUBSECTORS[key]
+    return f"{sub.label} ({family_label(sub.family)})"
+
+
+def _fact_input(name: str, label: str, company: CompanyProfile) -> Any:
+    """One key-fact widget; returns the override to apply, or None when the deck value stands."""
+    item = company.field(name)
+    key = _FACT_PREFIX + name
+    if name == "company_stage":
+        options: list[Any] = [None, *STAGES]
+        choice = st.selectbox(label, options, index=options.index(item.value) if item.value in STAGES else 0,
+                              format_func=lambda k: "Choose a stage" if k is None else STAGE_LABELS[k], key=key)
+        return choice if choice is not None and choice != item.value else None
+    if name == "subsector":
+        options = [None, *sorted(SUBSECTORS, key=_subsector_label)]
+        choice = st.selectbox(label, options, index=options.index(item.value) if item.value in SUBSECTORS else 0,
+                              format_func=lambda k: "Choose a sector" if k is None else _subsector_label(k), key=key)
+        return choice if choice is not None and choice != item.value else None
+    if name == "headquarters":
+        places = _geo_options()
+        deck_value = item.value if item.known else None
+        options = [deck_value, *[p for p in places if p != deck_value]] if deck_value else [None, *places]
+        choice = st.selectbox(label, options, index=0, key=key,
+                              format_func=lambda p: "Choose a location" if p is None
+                              else (f"{p} (from deck)" if p == deck_value else p))
+        return choice if choice is not None and choice != deck_value else None
+    if name == "business_model":
+        current = [k for k in (item.value or []) if k in BUSINESS_MODELS]
+        chosen = st.multiselect(label, list(BUSINESS_MODELS), default=current, format_func=BUSINESS_MODELS.get,
+                                placeholder="Choose one or more", key=key)
+        return chosen if chosen and sorted(chosen) != sorted(current) else None
+    if name == "traction":
+        text = st.text_area(label, value=item.value or "", height=90, key=key,
+                            placeholder="e.g. 12 paying hospitals, $40k MRR, 3 pilots")
+        return text if text.strip() and text.strip() != (item.value or "").strip() else None
+    # raise_amount
+    shown = company.display_value(name) if item.known else ""
+    text = st.text_input(label, value=shown, placeholder="e.g. $6M", key=key)
+    if not text.strip() or text.strip() == shown:
+        return None
+    if parse_money(text) is None:
+        st.caption("Couldn't read that amount — try $6M or 6,000,000.")
+        return None
+    return text
+
+
+def _other_fields_frame(company: CompanyProfile) -> pd.DataFrame:
+    rows = []
+    for name, spec in FIELD_SPECS.items():
+        if not spec.reviewable or name in _KEY_FIELDS:
+            continue
+        item = company.field(name)
+        rows.append({"key": name, "Field": spec.label, "Value": company.display_value(name),
+                     "Source": SOURCE_LABELS[item.source] if item.known else "Missing"})
+    return pd.DataFrame(rows)
+
+
+def render_facts(company: CompanyProfile) -> dict[str, Any]:
+    """The facts that drive matching, missing ones first; returns the user's overrides."""
+    session = st.session_state.session
+    ex = session.extraction
+    overrides: dict[str, Any] = {}
+    missing = [n for n in _KEY_FIELDS if not company.field(n).known]
+    for name in sorted(_KEY_FIELDS, key=lambda n: n not in missing):
+        label = _KEY_FIELDS[name]
+        if name in missing and not st.session_state.get(_FACT_PREFIX + name):
+            st.markdown(f'<p class="tc-missing">We couldn\'t find your {escape(label.lower())} – add it?</p>',
+                        unsafe_allow_html=True)
+        value = _fact_input(name, label, company)
+        if value is not None:
+            overrides[name] = value
+
+    with st.expander("Show all fields"):
+        st.caption("Edit any Value; edited fields are labeled user-supplied.")
+        frame = _other_fields_frame(company)
+        edited = st.data_editor(frame, key="editor", hide_index=True, disabled=["Field", "Source"],
+                                column_config={"key": None})
+        for (_i, before), (_j, after) in zip(frame.iterrows(), edited.iterrows(), strict=True):
+            new = str(after["Value"]).strip()
+            if new and new != str(before["Value"]).strip() and new != _MISSING_MARK:
+                overrides[before["key"]] = new
+    deck = (f"{ex.deck_filename} · {ex.deck_format.upper()} · {ex.deck_pages} pages/slides"
+            + (" · scanned" if ex.deck_scanned else ""))
+    if ex.warnings:
+        with st.expander(f"Notes from reading the deck ({len(ex.warnings)})"):
+            st.caption(deck)
+            for warning in ex.warnings:
+                st.caption(theme.safe_md(warning))
+    else:
+        st.caption(deck)
+    return overrides
+
+
+def render_preferences(settings: Any) -> tuple[InvestorPreferences, InvestorDataset]:
+    label = lambda key: INVESTOR_TYPES[key]  # noqa: E731
+    st.caption("Exclusions become hard filters; preferences add a small, visible ranking bonus.")
+    preferred = st.multiselect("Preferred investor types", _TYPE_KEYS, format_func=label, key="p_pref")
+    excluded = st.multiselect("Excluded investor types", _TYPE_KEYS, format_func=label, key="p_excl")
+    lead = st.radio("Lead investor required?", ["Auto (from deck)", "Yes", "No"], horizontal=True, key="p_lead")
+    geos = st.text_input("Preferred geographies (comma-separated)", key="p_geo")
+    use_default = st.checkbox("Include the configured investor dataset", value=True, key="p_default")
+    uploads = st.file_uploader("Additional investor datasets (CSV/JSON)", type=["csv", "json"],
+                               accept_multiple_files=True, key="p_uploads")
+    if uploads:
+        dataset = load_default_dataset(settings, [(f.name, f.getvalue()) for f in uploads],
+                                       include_defaults=use_default)
+    elif use_default:
+        dataset = _configured_dataset(settings)
+    else:
+        dataset = load_default_dataset(settings, [], include_defaults=False)
+    st.caption(f"Investor data: {dataset.label()} · {len(dataset.investors):,} records")
+    for warning in dataset.warnings:
+        (st.error if "SYNTHETIC" in warning else st.caption)(theme.safe_md(warning))
+    excluded_names = st.multiselect("Excluded investors", sorted({i.name for i in dataset.investors}),
+                                    key="p_excl_names")
+    extra = st.session_state.excluded_extra
+    if extra:
+        st.caption("Excluded from the results: " + ", ".join(extra))
+        if st.button("Clear result exclusions"):
+            st.session_state.excluded_extra = []
+            st.rerun()
     preferences = InvestorPreferences(
         preferred_types=preferred, excluded_types=excluded,
         preferred_geographies=[g.strip() for g in geos.split(",") if g.strip()],
@@ -301,7 +407,93 @@ def render_preferences(settings: Any, *, active: bool) -> tuple[InvestorPreferen
     return preferences, dataset
 
 
-# ---------------------------------------------------------------------------- step 4
+# ------------------------------------------------------------------- scoring and report
+
+
+def _signature(overrides: dict[str, Any], preferences: InvestorPreferences, config: MatchingConfig,
+               dataset: InvestorDataset) -> str:
+    """Everything the ranking depends on; a change means re-score."""
+    return json.dumps([sorted((k, str(v)) for k, v in overrides.items()), preferences.model_dump(mode="json"),
+                       config.weights.as_record(), dataset.label(), len(dataset.investors)],
+                      sort_keys=True, default=str)
+
+
+def _current_outcome(company: CompanyProfile, preferences: InvestorPreferences, dataset: InvestorDataset,
+                     config: MatchingConfig, sig: str) -> MatchOutcome:
+    """The outcome for these inputs: the analysis-time one first, then a deterministic re-score on change."""
+    outcome: MatchOutcome | None = st.session_state.outcome
+    if outcome is not None and st.session_state.outcome_sig in (None, sig):
+        st.session_state.outcome_sig = sig
+        return outcome
+    session = st.session_state.session
+    with st.spinner(f"Re-scoring {len(dataset.investors):,} investors..."):
+        outcome = run_matching(company, preferences, dataset, config,
+                               deck_scanned=bool(session and session.extraction.deck_scanned))
+    st.session_state.update(outcome=outcome, outcome_sig=sig)
+    return outcome
+
+
+def _current_report(outcome: MatchOutcome, config: MatchingConfig, settings: Any, sig: str) -> tuple[Any, Any]:
+    """(record, report) for these inputs, rebuilt only when the inputs change (about 0.1 s)."""
+    cached = st.session_state.report_cache
+    if cached and cached[0] == sig:
+        return cached[1], cached[2]
+    record = build_record(outcome, config=config, settings=settings, session=st.session_state.session,
+                          user=_user(), analysis_id=st.session_state.analysis_id)
+    report, record = generate_report(record, organization=settings.report_organization)
+    st.session_state.report_cache = (sig, record, report)
+    return record, report
+
+
+def _deliver(sig: str, record: Any, pdf_bytes: bytes, settings: Any) -> None:
+    """Email and save this version of the report in a background thread (once per version)."""
+    deliveries: dict[str, dict[str, Any]] = st.session_state.deliveries
+    if sig in deliveries:
+        return
+    holder: dict[str, Any] = {"done": False}
+    deliveries[sig] = holder
+
+    def work() -> None:
+        try:
+            sent, updated = notify_results(record, pdf_bytes, settings=settings)
+            holder["notification"] = sent
+            holder["saved"] = save_outputs(updated, pdf_bytes, settings.resolve(settings.output_dir))
+        except Exception as exc:  # noqa: BLE001 - a background job must report its failure, never crash
+            holder["error"] = str(exc)
+        finally:
+            holder["done"] = True
+
+    holder["thread"] = threading.Thread(target=work, name="tc-deliver", daemon=True)
+    holder["thread"].start()
+
+
+def _on_download(sig: str, record: Any, pdf_bytes: bytes, settings: Any) -> None:
+    st.session_state.downloaded = True
+    _deliver(sig, record, pdf_bytes, settings)
+
+
+def _delivery_status(sig: str, settings: Any) -> None:
+    holder = st.session_state.deliveries.get(sig)
+    if holder is None:
+        return
+    if not holder["done"]:
+        st.caption("Saving a copy for TEN's review...")
+    elif holder.get("error"):
+        st.caption(f"The report copy for TEN could not be saved: {holder['error']}")
+    else:
+        sent = holder.get("notification")
+        text = "Saved for TEN's review."
+        if sent is not None and settings.notify_configured:
+            text += " " + sent.summary()
+        st.caption(text)
+
+
+# ---------------------------------------------------------------------------- results
+
+
+def _first_sentence(text: str, limit: int = 220) -> str:
+    sentence = (text or "").split(". ")[0].strip().rstrip(".")
+    return (sentence[: limit - 1].rstrip() + "…") if len(sentence) > limit else sentence + "."
 
 
 def _match_details(match: InvestorMatch) -> None:
@@ -324,156 +516,141 @@ def _match_details(match: InvestorMatch) -> None:
                + (" · wording by Claude, fact-checked" if match.text_source == "llm_polished" else ""))
 
 
-def render_matches(settings: Any, config: MatchingConfig, prefs: tuple[InvestorPreferences, InvestorDataset],
-                   llm: LLMService, *, active: bool) -> None:
-    preferences, dataset = prefs
-    with theme.panel(4, "Ranked investor matches",
-                     "Scored on nine weighted criteria, filtered for hard incompatibilities, and ordered by "
-                     "outreach priority.", active=active):
-        cols = st.columns([1, 1, 3])
-        run = cols[0].button("Run matching", type="primary") or st.session_state.run_requested
-        recalc = cols[1].button("Recalculate")
-        if run or recalc:
-            st.session_state.run_requested = False
-            try:
-                session = st.session_state.session
-                spinner = "Scoring investors and drafting explanations..." if llm.configured \
-                    else "Scoring investors..."
-                with st.spinner(spinner):
-                    st.session_state.outcome = run_matching(
-                        st.session_state.company, preferences, dataset, config, llm=llm,
-                        deck_scanned=bool(session and session.extraction.deck_scanned))
-                st.session_state.update(record=None, pdf=None, report=None, saved=None, notification=None)
-            except MatchingEngineError as exc:
-                st.error(str(exc))
-                return
-            st.rerun()  # redraw so the stepper and the active panel reflect the new step
-        outcome = st.session_state.outcome
-        if outcome is None:
-            st.caption("Run matching when the extracted data and preferences look right.")
+def _toggle_contacted(investor_id: str) -> None:
+    contacted = set(st.session_state.contacted)
+    st.session_state.contacted = sorted(contacted ^ {investor_id})
+
+
+def _toggle_intro(match: InvestorMatch) -> None:
+    intro: dict[str, dict[str, Any]] = dict(st.session_state.intro_list)
+    if match.investor_id in intro:
+        del intro[match.investor_id]
+    else:
+        intro[match.investor_id] = {"name": match.investor_name, "type": match.investor_type_label,
+                                    "tier": TIER_LABELS[match.outreach_priority], "fit": match.fit_score,
+                                    "angle": match.outreach_angle, "why": match.rationale}
+    st.session_state.intro_list = intro
+
+
+def _exclude(name: str) -> None:
+    st.session_state.excluded_extra = sorted(set(st.session_state.excluded_extra) | {name})
+
+
+def _render_card(rank: int, match: InvestorMatch) -> None:
+    investor = match.kind == "investor"
+    contacted = match.investor_id in st.session_state.contacted
+    listed = match.investor_id in st.session_state.intro_list
+    with st.container(border=True, key=f"tc-match-{rank}"):
+        badges = [theme.badge(TIER_LABELS[match.outreach_priority], _TIER_COLORS[match.outreach_priority])]
+        if contacted:
+            badges.append(theme.badge("Already contacted", theme.TOKENS["ink_500"]))
+        if listed:
+            badges.append(theme.badge("On intro list", theme.TOKENS["teal"]))
+        name = _h(match.investor_name) + (" (profile)" if not investor else "")
+        concern = (f'<p class="tc-concern"><b>Top concern:</b> {_h(match.likely_concerns[0])}</p>'
+                   if match.likely_concerns else "")
+        st.markdown(
+            f'<div class="tc-card-head"><div><div class="tc-card-name"><span class="rank">{rank}.</span>{name}</div>'
+            f'<div class="tc-card-meta">{_h(match.investor_type_label)} · fit {match.fit_score:.0f} · '
+            f'{_h(match.confidence)} confidence</div></div><div class="tc-badges">{"".join(badges)}</div></div>'
+            f'<p class="tc-why">{_h(_first_sentence(match.rationale))}</p>{concern}',
+            unsafe_allow_html=True)
+        with st.expander("See scoring"):
+            _match_details(match)
+        if not investor:
+            theme.copy_button("Copy outreach angle", match.outreach_angle)
             return
-
-        rows = outcome.run.top(config.ranking.top_n)
-        named = [m for m in outcome.run.matches if m.outreach_priority != "do_not_target"]
-        tier1 = sum(1 for m in named if m.outreach_priority == "tier_1")
-        top_fit = f"{rows[0].fit_score:.0f}" if rows else "-"
-        theme.tiles([("Named matches", str(len(named)), theme.TOKENS["teal"]),
-                     ("Tier 1 · contact now", str(tier1), theme.TOKENS["amber"]),
-                     ("Removed by filters", str(len(outcome.run.rejected)), theme.TOKENS["coral"]),
-                     ("Top fit score", top_fit, theme.TOKENS["ink_100"])])
-        theme.label("Ideal investor profile")
-        st.markdown("\n".join(f"- {theme.safe_md(point)}" for point in outcome.iip.summary_points))
-        table = pd.DataFrame([{
-            "#": i, "Investor": m.investor_name + (" (profile)" if m.kind == "archetype" else ""),
-            "Type": m.investor_type_label, "Priority": TIER_LABELS[m.outreach_priority], "Fit": m.fit_score,
-            "Adjusted": m.adjusted_score, "Confidence": m.confidence, "Evidence": EVIDENCE_LABELS[m.evidence_quality],
-            "Concern": m.likely_concerns[0] if m.likely_concerns else "",
-        } for i, m in enumerate(rows, start=1)])
-        st.dataframe(table, hide_index=True)
-        if dataset.any_synthetic:
-            st.error("These named investors come from a SYNTHETIC test dataset and are fictitious.")
-
-        for i, match in enumerate(rows, start=1):
-            with st.expander(f"{i}. {match.investor_name} - {TIER_LABELS[match.outreach_priority]} · "
-                             f"fit {match.fit_score:.0f}"):
-                _match_details(match)
-                if match.kind == "investor" and st.button("Exclude this investor", key=f"exclude_{match.investor_id}"):
-                    st.session_state.excluded_extra = sorted(set(st.session_state.excluded_extra) | {match.investor_name})
-                    st.session_state.run_requested = True
-                    st.rerun()
-
-        others = [m for m in outcome.run.matches if m not in rows]
-        if others:
-            with st.expander(f"Other scored investors ({len(others)})"):
-                st.dataframe(pd.DataFrame([{"Investor": m.investor_name, "Priority": TIER_LABELS[m.outreach_priority],
-                                            "Fit": m.fit_score, "Adjusted": m.adjusted_score,
-                                            "Reason": m.priority_reason} for m in others]), hide_index=True)
-        if outcome.run.rejected:
-            with st.expander(f"Rejected by hard filters ({len(outcome.run.rejected)}) - audit"):
-                st.dataframe(pd.DataFrame([{"Investor": r.investor_name,
-                                            "Reasons": " | ".join(x.detail for x in r.reasons)}
-                                           for r in outcome.run.rejected]), hide_index=True)
-        st.info(f"**Recommended next action:** {theme.safe_md(outcome.next_action)}")
-        for gap in outcome.gaps:
-            st.caption(f"Data quality: {theme.safe_md(gap)}")
-        for note in outcome.llm_notes:
-            st.caption(theme.safe_md(note))
+        cols = st.columns([1.35, 1.1, 1.15, 0.8])
+        with cols[0]:
+            theme.copy_button("Copy outreach angle", match.outreach_angle)
+        cols[1].button("Contacted ✓" if contacted else "Mark contacted", help="Mark as already contacted "
+                       "(click again to undo)", key=f"contacted_{match.investor_id}", on_click=_toggle_contacted, args=(match.investor_id,),
+                       width="stretch")
+        cols[2].button("On intro list ✓" if listed else "Add to intro list", help="Collect intros to export "
+                       "for Pipedrive (click again to remove)", key=f"intro_{match.investor_id}", on_click=_toggle_intro, args=(match,),
+                       width="stretch")
+        cols[3].button("Exclude", help="Exclude this investor and re-score", key=f"exclude_{match.investor_id}", on_click=_exclude,
+                       args=(match.investor_name,), width="stretch")
 
 
-# ---------------------------------------------------------------------------- step 5
+def _intro_list_csv(company: CompanyProfile) -> str:
+    """The intro list in columns Pipedrive's spreadsheet import maps directly (organization + deal)."""
+    rows = [{
+        "Organization name": item["name"],
+        "Deal title": f"{company.display_name} intro – {item['name']}",
+        "Investor type": item["type"],
+        "Priority": item["tier"],
+        "Fit score": item["fit"],
+        "Status": "Already contacted" if investor_id in st.session_state.contacted else "To introduce",
+        "Outreach angle": item["angle"],
+        "Why it fits": item["why"],
+    } for investor_id, item in st.session_state.intro_list.items()]
+    return pd.DataFrame(rows).to_csv(index=False)
 
 
-def render_export(settings: Any, config: MatchingConfig, *, active: bool) -> None:
-    with theme.panel(5, "Generate the report", "The one-page TEN Capital Investor Matching Report and the "
-                     "machine-readable JSON record.", active=active):
-        outcome = st.session_state.outcome
-        if outcome is None:
-            st.caption("Available after matching.")
-            return
-
-        def current_record() -> Any:
-            return build_record(outcome, config=config, settings=settings,
-                                session=st.session_state.session, user=_user(),
-                                analysis_id=st.session_state.analysis_id)
-
-        cols = st.columns([1, 1, 3])
-        if cols[0].button("Generate PDF", type="primary"):
-            try:
-                with st.spinner("Generating the report..."):
-                    report, record = generate_report(current_record(), organization=settings.report_organization)
-            except MatchingEngineError as exc:
-                st.error(str(exc))
-                return
-            with st.spinner("Emailing the results..." if settings.notify_configured else "Finishing..."):
-                sent, record = notify_results(record, report.pdf_bytes, settings=settings)
-            st.session_state.update(record=record, pdf=report.pdf_bytes, report=report, saved=None,
-                                    notification=sent)
-            json_path, pdf_path = save_outputs(record, report.pdf_bytes, settings.resolve(settings.output_dir))
-            st.session_state.saved = (json_path, pdf_path)
-            st.rerun()
-        if cols[1].button("Export JSON"):
-            st.session_state.record = st.session_state.record or current_record()
-
-        record = st.session_state.record
-        if record is None:
-            return
+def render_results(outcome: MatchOutcome, config: MatchingConfig, dataset: InvestorDataset,
+                   company: CompanyProfile, settings: Any, sig: str) -> None:
+    try:
+        record, report = _current_report(outcome, config, settings, sig)
+    except MatchingEngineError as exc:
+        st.error(f"The report could not be generated: {exc}")
+        record = report = None
+    if record is not None and report is not None:
         base = output_basename(record)
-        if st.session_state.pdf is not None:
-            report = st.session_state.report
-            st.success(f"One-page report generated ({report.page_count} page).")
-            if report.reductions:
-                st.caption("To stay on one page: " + "; ".join(report.reductions) + ".")
-        download_cols = st.columns([1, 1, 3])
-        if st.session_state.pdf is not None:
-            download_cols[0].download_button("Download PDF", st.session_state.pdf, file_name=f"{base}_report.pdf",
-                                             mime="application/pdf")
-        download_cols[1].download_button("Download JSON", record_to_json(record), file_name=f"{base}.json",
-                                         mime="application/json")
-        if st.session_state.saved:
-            json_path, pdf_path = st.session_state.saved
-            st.caption(f"Saved on the server: {pdf_path.name} and {json_path.name}")
-        sent = st.session_state.get("notification")
-        if sent is not None and settings.notify_configured:
-            if sent.sent:
-                st.success(sent.summary())
-            elif sent.attempted:
-                st.warning(sent.summary() + " The report itself is unaffected.")
-            else:
-                st.caption(sent.summary())
+        st.download_button("Download the one-page report (PDF)", report.pdf_bytes, file_name=f"{base}_report.pdf",
+                           mime="application/pdf", type="primary", on_click=_on_download,
+                           args=(sig, record, report.pdf_bytes, settings))
+        if report.reductions:
+            st.caption("To stay on one page: " + "; ".join(report.reductions) + ".")
+        _delivery_status(sig, settings)
+
+    rows = outcome.run.top(config.ranking.top_n)
+    named = [m for m in outcome.run.matches if m.outreach_priority != "do_not_target"]
+    tier1 = sum(1 for m in named if m.outreach_priority == "tier_1")
+    top_fit = f"{rows[0].fit_score:.0f}" if rows else "-"
+    theme.tiles([("Named matches", str(len(named)), theme.TOKENS["teal"]),
+                 ("Tier 1 · contact now", str(tier1), theme.TOKENS["amber"]),
+                 ("Removed by filters", str(len(outcome.run.rejected)), theme.TOKENS["coral"]),
+                 ("Top fit score", top_fit, theme.TOKENS["ink_100"])])
+    if dataset.any_synthetic:
+        st.error("These named investors come from a SYNTHETIC test dataset and are fictitious.")
+    st.info(f"**Recommended next action:** {theme.safe_md(outcome.next_action)}")
+
+    intro = st.session_state.intro_list
+    if intro:
+        theme.label(f"Intro list ({len(intro)})")
+        st.caption(", ".join(item["name"] for item in intro.values()))
+        st.download_button("Download intro list for Pipedrive (CSV)", _intro_list_csv(company),
+                           file_name=f"{company.display_name} intro list.csv", mime="text/csv",
+                           on_click="ignore")
+
+    for rank, match in enumerate(rows, start=1):
+        _render_card(rank, match)
+
+    with st.expander("Ideal investor profile"):
+        st.markdown("\n".join(f"- {theme.safe_md(point)}" for point in outcome.iip.summary_points))
+    others = [m for m in outcome.run.matches if m not in rows]
+    if others:
+        with st.expander(f"Other scored investors ({len(others)})"):
+            st.dataframe(pd.DataFrame([{"Investor": m.investor_name, "Priority": TIER_LABELS[m.outreach_priority],
+                                        "Fit": m.fit_score, "Adjusted": m.adjusted_score,
+                                        "Reason": m.priority_reason} for m in others]), hide_index=True)
+    if outcome.run.rejected:
+        with st.expander(f"Rejected by hard filters ({len(outcome.run.rejected)}) - audit"):
+            st.dataframe(pd.DataFrame([{"Investor": r.investor_name,
+                                        "Reasons": " | ".join(x.detail for x in r.reasons)}
+                                       for r in outcome.run.rejected]), hide_index=True)
+    if record is not None:
+        with st.expander("Machine-readable record (JSON)"):
+            st.download_button("Download JSON", record_to_json(record), file_name=f"{output_basename(record)}.json",
+                               mime="application/json", on_click="ignore")
+    for gap in outcome.gaps:
+        st.caption(f"Data quality: {theme.safe_md(gap)}")
+    for note in outcome.llm_notes:
+        st.caption(theme.safe_md(note))
 
 
 # -------------------------------------------------------------------------- workspace
-
-
-def _progress() -> tuple[int, int]:
-    """(current step, last completed step) for the stepper."""
-    if st.session_state.pdf is not None:
-        return 5, 5
-    if st.session_state.outcome is not None:
-        return 4, 3
-    if st.session_state.reviewed:
-        return 3, 2
-    return 2, 1
 
 
 def _status_chips(settings: Any, llm: LLMService) -> str:
@@ -486,7 +663,6 @@ def _status_chips(settings: Any, llm: LLMService) -> str:
 
 def render_workspace(settings: Any, llm: LLMService, base_config: MatchingConfig) -> None:
     config = render_sidebar(base_config, llm, settings)
-    current, completed = _progress()
     left, right = st.columns([5, 1], vertical_alignment="center")
     with left:
         theme.topbar(_status_chips(settings, llm))
@@ -494,13 +670,34 @@ def render_workspace(settings: Any, llm: LLMService, base_config: MatchingConfig
         if st.button("New analysis", key="new_analysis"):
             _reset_analysis()
             st.rerun()
-    theme.stepper(current, completed)
-    company: CompanyProfile = st.session_state.company
-    st.markdown(f'<h1 class="tc-h1">{escape(company.display_name)}</h1>', unsafe_allow_html=True)
-    render_review(active=current == 2)
-    prefs = render_preferences(settings, active=current == 3)
-    render_matches(settings, config, prefs, llm, active=current == 4)
-    render_export(settings, config, active=current == 5)
+    done = 3 if st.session_state.downloaded else 1
+    theme.stepper(3 if st.session_state.downloaded else 2, done)
+    title = st.empty()
+
+    base: CompanyProfile = st.session_state.company
+    facts_col, results_col = st.columns([2, 3], gap="large")
+    with facts_col, theme.panel("Company facts", "What we read from the deck",
+                                "Fix anything that's wrong; the matches re-score as you edit."):
+        overrides = render_facts(base)
+        with st.expander("Targeting and investor data"):
+            preferences, dataset = render_preferences(settings)
+    company = base.apply_overrides(overrides) if overrides else base
+    title.markdown(f'<h1 class="tc-h1">{escape(company.display_name)}</h1>', unsafe_allow_html=True)
+    sig = _signature(overrides, preferences, config, dataset)
+
+    with results_col, theme.panel("Investor matches", "Ranked investor matches", "Scored on nine weighted "
+                                  "criteria, filtered for hard incompatibilities, and ordered by outreach "
+                                  "priority.", active=True):
+        try:
+            outcome = _current_outcome(company, preferences, dataset, config, sig)
+        except MatchingEngineError as exc:
+            st.error(str(exc))
+            return
+        render_results(outcome, config, dataset, company, settings, sig)
+    # The first version of every analysis goes to TEN; later versions go when downloaded.
+    if not st.session_state.deliveries and st.session_state.report_cache:
+        _sig, record, report = st.session_state.report_cache
+        _deliver(sig, record, report.pdf_bytes, settings)
     theme.footer()
 
 
@@ -516,7 +713,8 @@ def _password_gate(settings: Any) -> bool:
         return True
     st.markdown(theme.brand_lockup(), unsafe_allow_html=True)
     with theme.card("Restricted access",
-                    'TEN Capital<span class="arrow">&middot;</span><span class="to">Investor Matching</span>',
+                    'TEN Capital<span class="arrow" aria-hidden="true">&middot;</span>'
+                    '<span class="to">Investor Matching</span>',
                     lede="Enter the access password provided by TEN Capital."):
         entered = st.text_input("Access password", type="password", key="access_password")
         if st.button("Enter", type="primary"):
@@ -537,7 +735,9 @@ def main() -> None:
     _init_state()
     settings = get_settings()
     theme.inject(wide=workspace,
-                 upload_hint=f"Click to choose a deck\n.pdf  ·  .pptx  ·  .ppt  ·  up to {settings.max_upload_mb} MB")
+                 upload_hint="Drag and drop your deck here\nor click to browse  ·  .pdf  ·  .pptx  ·  .ppt  ·  "
+                             f"up to {settings.max_upload_mb} MB")
+    theme.page_script()
     if not _password_gate(settings):
         return
     try:
@@ -549,7 +749,7 @@ def main() -> None:
     if workspace:
         render_workspace(settings, llm, base_config)
     else:
-        render_landing(settings, llm)
+        render_landing(settings, llm, base_config)
 
 
 main()

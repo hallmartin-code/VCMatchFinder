@@ -9,6 +9,7 @@ Each step is separately callable so the UI can pause for human review between th
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -46,6 +47,13 @@ from app.utils.logging import get_logger
 from app.utils.text import slugify
 
 LOGGER = get_logger(__name__)
+
+#: Called with a stage name as work starts on it: "reading", "extracting", "scoring", "explaining".
+Progress = Callable[[str], None]
+
+
+def _noop(_stage: str) -> None:
+    pass
 
 
 @dataclass
@@ -96,8 +104,10 @@ def analyze_deck(
     upload: tuple[str, bytes] | None = None,
     notes_text: str = "",
     llm: LLMService | None = None,
+    progress: Progress = _noop,
 ) -> AnalysisSession:
     """Parse a deck and extract the normalized company record."""
+    progress("reading")
     if upload is not None:
         filename, data = upload
         doc = parse_uploaded_deck(filename, data, max_bytes=settings.max_upload_bytes)
@@ -108,6 +118,7 @@ def analyze_deck(
     else:
         raise ValueError("analyze_deck needs a deck_path or an upload.")
 
+    progress("extracting")
     notes = notes_document(notes_text)
     llm_notes: list[str] = []
     extra: list[dict[str, Any]] = []
@@ -141,11 +152,14 @@ def run_matching(
     today: date | None = None,
     llm: LLMService | None = None,
     deck_scanned: bool = False,
+    progress: Progress = _noop,
 ) -> MatchOutcome:
+    progress("scoring")
     today = today or date.today()
     iip = build_ideal_investor_profile(company, preferences)
     ranking = rank_investors(dataset.investors, company, preferences, config, iip, today=today)
     needs_lead = company.needs_lead(preferences.lead_required)
+    progress("explaining")
     explain_matches(ranking.run, company, ranking.records, config, needs_lead=needs_lead, today=today)
 
     polished = 0

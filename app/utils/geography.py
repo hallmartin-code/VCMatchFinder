@@ -15,7 +15,8 @@ NORTH_AMERICA); an investor token matches when it appears in that expansion.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import lru_cache
 
 US_STATES: dict[str, str] = {
     "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
@@ -131,6 +132,12 @@ def parse_geo_tokens(text: str | None) -> set[str]:
     """Tokens for every place named in free text (investor mandates, preferences)."""
     if not text:
         return set()
+    return set(_geo_tokens(text))
+
+
+# A 20,000-investor list repeats the same few hundred mandate strings; parse each once.
+@lru_cache(maxsize=65536)
+def _geo_tokens(text: str) -> frozenset[str]:
     lowered = f" {text.lower()} "
     tokens: set[str] = set()
     if any(_has_word(lowered, word) for word in _GLOBAL_WORDS):
@@ -159,17 +166,27 @@ def parse_geo_tokens(text: str | None) -> set[str]:
     for city, country in _INTL_CITIES.items():
         if _has_word(lowered, city):
             tokens.add(COUNTRIES[country][0])
+    # "West Virginia" contains "virginia"; keep Virginia only when it is named on its own.
+    if "US-WV" in tokens and "virginia" not in lowered.replace("west virginia", ""):
+        tokens.discard("US-VA")
     # "Georgia" alone is ambiguous; keep the US reading only with other US context.
     if "US-GA" in tokens and "georgia" in lowered and not (tokens & {"US", "NORTH_AMERICA"}) \
             and not re.search(r"atlanta|, ga\b", lowered):
         tokens.discard("US-GA")
-    return tokens
+    return frozenset(tokens)
 
 
 def resolve_location(text: str | None) -> GeoLocation | None:
     """Resolve a company HQ string to a location with its upward expansion."""
     if not text or not text.strip():
         return None
+    location = _resolve_location(text)
+    # A copy, so a caller that edits its location can never change the cached one.
+    return replace(location, tokens=set(location.tokens)) if location else None
+
+
+@lru_cache(maxsize=4096)
+def _resolve_location(text: str) -> GeoLocation | None:
     tokens = parse_geo_tokens(text)
     states = sorted(t[3:] for t in tokens if t.startswith("US-") and not t.startswith("US-REGION"))
     countries = sorted(t for t in tokens if len(t) == 2 and t.isupper())
