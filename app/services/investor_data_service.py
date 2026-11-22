@@ -76,9 +76,16 @@ def repository_for_upload(filename: str, data: bytes) -> InvestorRepository:
 
 def load_investor_dataset(
     paths: Iterable[Path] = (), uploads: Iterable[tuple[str, bytes]] = (),
+    repositories_extra: Iterable[InvestorRepository] = (),
 ) -> InvestorDataset:
     repositories: list[InvestorRepository] = []
     warnings: list[str] = []
+    for repo in repositories_extra:
+        try:
+            repo.list_investors()  # load now so a connection failure becomes a warning
+            repositories.append(repo)
+        except MatchingEngineError as exc:
+            warnings.append(str(exc))
     for path in paths:
         if not path.exists():
             warnings.append(f"Investor dataset not found: {path.name}")
@@ -114,4 +121,8 @@ def load_investor_dataset(
 def load_default_dataset(settings: Settings, uploads: Iterable[tuple[str, bytes]] = (),
                          *, include_defaults: bool = True) -> InvestorDataset:
     paths = settings.investor_paths() if include_defaults else []
-    return load_investor_dataset(paths, uploads)
+    extra: list[InvestorRepository] = []
+    if include_defaults and settings.database_configured:
+        from app.data.postgres_repository import PostgresInvestorRepository
+        extra.append(PostgresInvestorRepository(settings.database_url.get_secret_value()))
+    return load_investor_dataset(paths, uploads, extra)

@@ -140,6 +140,12 @@ class Settings(BaseSettings):
         default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY", "TEN_ANTHROPIC_API_KEY")
     )
     investor_data_paths: str = "sample_data/investors_synthetic.json"
+    #: Postgres connection string for the InvestorMatch investor database. When set, its
+    #: investors are loaded alongside (or, with TEN_INVESTOR_DATA_PATHS empty, instead of)
+    #: the file datasets. Railway provides it via a ${{Postgres.DATABASE_URL}} reference.
+    database_url: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("DATABASE_URL", "TEN_DATABASE_URL")
+    )
     max_upload_mb: int = Field(50, ge=1, le=500)
     output_dir: Path = Path("output")
     weights_file: Path = Path("config/matching.toml")
@@ -176,6 +182,10 @@ class Settings(BaseSettings):
 
     def investor_paths(self) -> list[Path]:
         return [self.resolve(p.strip()) for p in self.investor_data_paths.split(";") if p.strip()]
+
+    @property
+    def database_configured(self) -> bool:
+        return bool(self.database_url and self.database_url.get_secret_value().strip())
 
     @property
     def max_upload_bytes(self) -> int:
