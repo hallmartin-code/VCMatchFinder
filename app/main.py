@@ -36,6 +36,7 @@ import streamlit as st  # noqa: E402
 
 from app.config import CRITERIA, MatchingConfig, get_settings  # noqa: E402
 from app.errors import ConfigError, MatchingEngineError  # noqa: E402
+from app.intelligence.sample_email import SampleEmail, sample_email  # noqa: E402
 from app.matching.taxonomy import (  # noqa: E402
     BUSINESS_MODELS,
     INVESTOR_TYPES,
@@ -536,7 +537,7 @@ def _exclude(name: str) -> None:
     st.session_state.excluded_extra = sorted(set(st.session_state.excluded_extra) | {name})
 
 
-def _render_card(rank: int, match: InvestorMatch) -> None:
+def _render_card(rank: int, match: InvestorMatch, email: SampleEmail) -> None:
     investor = match.kind == "investor"
     contacted = match.investor_id in st.session_state.contacted
     listed = match.investor_id in st.session_state.intro_list
@@ -557,20 +558,25 @@ def _render_card(rank: int, match: InvestorMatch) -> None:
             unsafe_allow_html=True)
         with st.expander("See scoring"):
             _match_details(match)
+        with st.expander(f"Sample email for this {match.investor_type_label.lower()}"):
+            st.markdown(f"**Subject:** {theme.safe_md(email.subject)}")
+            st.text(email.body)
+            st.caption("A draft to review and edit: fill in the [bracketed] parts before sending. "
+                       "This app never sends it.")
         if not investor:
-            theme.copy_button("Copy outreach angle", match.outreach_angle)
+            theme.copy_button("Copy sample email", email.text())
             return
         cols = st.columns([1.35, 1.1, 1.15, 0.8])
         with cols[0]:
-            theme.copy_button("Copy outreach angle", match.outreach_angle)
-        cols[1].button("Contacted ✓" if contacted else "Mark contacted", help="Mark as already contacted "
-                       "(click again to undo)", key=f"contacted_{match.investor_id}", on_click=_toggle_contacted, args=(match.investor_id,),
-                       width="stretch")
-        cols[2].button("On intro list ✓" if listed else "Add to intro list", help="Collect intros to export "
-                       "for Pipedrive (click again to remove)", key=f"intro_{match.investor_id}", on_click=_toggle_intro, args=(match,),
-                       width="stretch")
-        cols[3].button("Exclude", help="Exclude this investor and re-score", key=f"exclude_{match.investor_id}", on_click=_exclude,
-                       args=(match.investor_name,), width="stretch")
+            theme.copy_button("Copy sample email", email.text())
+        cols[1].button("Contacted ✓" if contacted else "Mark contacted",
+                       help="Mark as already contacted (click again to undo)", key=f"contacted_{match.investor_id}",
+                       on_click=_toggle_contacted, args=(match.investor_id,), width="stretch")
+        cols[2].button("On intro list ✓" if listed else "Add to intro list",
+                       help="Collect intros to export for Pipedrive (click again to remove)",
+                       key=f"intro_{match.investor_id}", on_click=_toggle_intro, args=(match,), width="stretch")
+        cols[3].button("Exclude", help="Exclude this investor and re-score", key=f"exclude_{match.investor_id}",
+                       on_click=_exclude, args=(match.investor_name,), width="stretch")
 
 
 def _intro_list_csv(company: CompanyProfile) -> str:
@@ -624,8 +630,11 @@ def render_results(outcome: MatchOutcome, config: MatchingConfig, dataset: Inves
                            file_name=f"{company.display_name} intro list.csv", mime="text/csv",
                            on_click="ignore")
 
+    needs_lead = company.needs_lead(outcome.preferences.lead_required)
     for rank, match in enumerate(rows, start=1):
-        _render_card(rank, match)
+        email = sample_email(match, company, inv=outcome.records.get(match.investor_id), needs_lead=needs_lead,
+                             today=outcome.today)
+        _render_card(rank, match, email)
 
     with st.expander("Ideal investor profile"):
         st.markdown("\n".join(f"- {theme.safe_md(point)}" for point in outcome.iip.summary_points))

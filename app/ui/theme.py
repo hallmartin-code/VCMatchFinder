@@ -453,5 +453,8 @@ def badge(text: str, color: str) -> str:
 
 def copy_button(label_text: str, text: str) -> None:
     """A button that copies ``text`` to the clipboard (wired by page_script)."""
+    # Entities, not raw characters: a blank line would end the markdown HTML block, and a
+    # pair of "$" would be read as LaTeX.
+    payload = escape(text).replace("\n", "&#10;").replace("$", "&#36;")
     st.markdown(f'<button type="button" class="tc-copy" data-label="{escape(label_text)}" '
-                f'data-copy="{escape(text)}">{escape(label_text)}</button>', unsafe_allow_html=True)
+                f'data-copy="{payload}">{escape(label_text)}</button>', unsafe_allow_html=True)
