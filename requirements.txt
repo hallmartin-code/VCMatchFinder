@@ -11,6 +11,8 @@ reportlab==5.0.1
 streamlit==1.63.0
 # Claude API (used when TEN_LLM_ENABLED=true and an API key is configured)
 anthropic==1.5.0
+# Postgres investor database (used when DATABASE_URL is set)
+psycopg[binary]==3.3.9
 
 # Development
 pytest==9.1.1
