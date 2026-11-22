@@ -26,6 +26,18 @@ FundStatus = Literal["active", "fundraising", "between_funds", "inactive", "unkn
 NOT_INVESTING_STATUSES: frozenset[str] = frozenset({"between_funds", "inactive"})
 
 
+class InvestorContact(BaseModel):
+    """A person at the investor, as held in the investor list (never inferred)."""
+
+    first_name: str = ""
+    last_name: str = ""
+    email: str | None = None
+
+    @property
+    def name(self) -> str:
+        return " ".join(p for p in (self.first_name, self.last_name) if p)
+
+
 class HistoricalInvestment(BaseModel):
     company: str
     sector: str | None = None
@@ -74,6 +86,8 @@ class InvestorRecord(BaseModel):
     is_synthetic: bool = False
     is_archetype: bool = False
     notes: str | None = None
+    #: People at this investor from the investor list, in list order.
+    contacts: list[InvestorContact] = Field(default_factory=list)
 
     # ----------------------------------------------------------- normalized views
 
@@ -93,6 +107,10 @@ class InvestorRecord(BaseModel):
 
     def strategic_tags(self) -> set[str]:
         return parse_strategic_tags(self.strategic_capabilities)
+
+    def primary_contact(self) -> InvestorContact | None:
+        """The first listed contact with an email address, else the first listed contact."""
+        return next((c for c in self.contacts if c.email), self.contacts[0] if self.contacts else None)
 
     def business_model_tags(self) -> set[str]:
         return parse_business_models(self.business_model_preferences)

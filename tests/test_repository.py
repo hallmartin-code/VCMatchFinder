@@ -97,3 +97,25 @@ def test_remote_repository_base_normalizes_rows():
     investors = FakeCrm("fake-crm").list_investors()
     assert investors[0].name == "Remote Capital"
     assert investors[0].data_source == "fake-crm"
+
+
+def test_contacts_from_columns_or_a_list():
+    csv_data = ("Investor,Contact Name,Contact Email\n"
+                "Northlight Dx Fund,Dana Reyes,dana@northlight.example\n"
+                "Harbour Test Ventures,Sam Ito,not-an-email\n").encode()
+    investors = {i.name: i for i in CsvInvestorRepository(data=csv_data, name="t.csv").list_investors()}
+    dana = investors["Northlight Dx Fund"].primary_contact()
+    assert (dana.first_name, dana.last_name, dana.email) == ("Dana", "Reyes", "dana@northlight.example")
+    assert investors["Harbour Test Ventures"].contacts[0].email is None  # a bad address is dropped, not guessed
+
+    class FakeDb(RemoteInvestorRepository):
+        def fetch_rows(self) -> Iterator[dict[str, Any]]:
+            yield {"name": "Remote Capital", "contacts": [
+                {"first_name": "Ann", "last_name": "Lee", "email": None},
+                {"first_name": "Bo", "last_name": "Kim", "email": "bo@remote.example"},
+                {"first_name": "Bo", "last_name": "Kim", "email": "BO@remote.example"},  # duplicate
+            ]}
+
+    [remote] = FakeDb("fake-db").list_investors()
+    assert [c.name for c in remote.contacts] == ["Ann Lee", "Bo Kim"]
+    assert remote.primary_contact().email == "bo@remote.example"  # first contact with an email

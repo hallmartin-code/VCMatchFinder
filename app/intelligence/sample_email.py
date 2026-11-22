@@ -1,9 +1,10 @@
 """A sample first-outreach email per match, framed for the investor's type.
 
 Like the rest of the explanation text, every fact comes from the company record or the
-investor record: the company's evidenced proof points, the match's fit reasons, and deals
-from the investor dataset. Anything the engine cannot know (the recipient's first name,
-the sender) is left as a bracketed placeholder. The app never sends it - it is a draft
+investor record: the company's evidenced proof points, the match's fit reasons, deals
+from the investor dataset, and the contact's first name when the investor list has one.
+Anything the engine cannot know (a missing contact, the sender) is left as a bracketed
+placeholder. The app never sends it - it is a draft
 for a person to review, edit and send.
 """
 
@@ -16,7 +17,7 @@ from app.intelligence.outreach import proof_points
 from app.matching.scoring import describe_deal, relevant_deals
 from app.matching.taxonomy import STRATEGIC_TYPES, family_label, stage_label, subsector_label
 from app.models.company import CompanyProfile
-from app.models.investor import InvestorRecord
+from app.models.investor import InvestorContact, InvestorRecord
 from app.models.match import InvestorMatch
 from app.utils.money import format_money
 
@@ -94,7 +95,8 @@ def _can_lead(match: InvestorMatch) -> bool:
 
 
 def sample_email(match: InvestorMatch, company: CompanyProfile, *, inv: InvestorRecord | None = None,
-                 needs_lead: bool = False, today: date | None = None) -> SampleEmail:
+                 needs_lead: bool = False, today: date | None = None,
+                 contact: InvestorContact | None = None) -> SampleEmail:
     """A first-outreach draft for this match, framed for its investor type."""
     today = today or date.today()
     group = _group(match.investor_type)
@@ -139,7 +141,8 @@ def sample_email(match: InvestorMatch, company: CompanyProfile, *, inv: Investor
         ask += " We are also looking for a lead investor to anchor the round."
 
     points = [p.text for p in proof_points(company)][:3]
-    paragraphs = ["Hi [First name],", openers[group], _intro(company)]
+    greeting = (contact.first_name if contact and contact.first_name else "[First name]")
+    paragraphs = [f"Hi {greeting},", openers[group], _intro(company)]
     if points:
         paragraphs.append("Highlights: " + "; ".join(points) + ".")
     fit = _fit_lines(match, inv, company, today)

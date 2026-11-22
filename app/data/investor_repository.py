@@ -23,7 +23,7 @@ from pydantic import ValidationError
 
 from app.errors import InvestorDataError
 from app.matching.taxonomy import parse_investor_type, parse_lead_capability, parse_stages
-from app.models.investor import HistoricalInvestment, InvestorRecord
+from app.models.investor import HistoricalInvestment, InvestorContact, InvestorRecord
 from app.utils.logging import get_logger
 from app.utils.money import parse_money, parse_money_range
 from app.utils.text import normalize_name, slugify
@@ -67,6 +67,11 @@ _ALIASES: dict[str, tuple[str, ...]] = {
     "last_verified": ("last_verified", "verified", "verified_on", "last_updated"),
     "notes": ("notes", "comments", "note"),
     "is_synthetic": ("is_synthetic", "synthetic"),
+    "contacts": ("contacts", "contact_list"),
+    "contact_first_name": ("contact_first_name", "first_name"),
+    "contact_last_name": ("contact_last_name", "last_name"),
+    "contact_name": ("contact_name", "contact", "primary_contact"),
+    "contact_email": ("contact_email", "email", "email_address"),
 }
 _LIST_FIELDS = ("investment_geographies", "excluded_geographies", "sector_preferences",
                 "excluded_sectors", "portfolio_companies", "strategic_capabilities",
@@ -79,6 +84,42 @@ _DEAL_RE = re.compile(
     re.I,
 )
 _URL_LIKE = re.compile(r"^(?:https?://)?[\w.-]+\.[a-z]{2,}(?:/\S*)?$", re.I)
+
+
+_EMAIL_RE = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[a-z]{2,}$", re.I)
+
+
+def _contact(first: Any, last: Any = None, email: Any = None, *, full_name: Any = None) -> InvestorContact | None:
+    """A contact from the list's own fields; an address that is not a plain email is dropped."""
+    first = " ".join(str(first or "").split())
+    last = " ".join(str(last or "").split())
+    if not first and not last and full_name:
+        first, _, last = " ".join(str(full_name).split()).partition(" ")
+    address = str(email or "").strip()
+    address = address if _EMAIL_RE.match(address) else None
+    if not (first or last or address):
+        return None
+    return InvestorContact(first_name=first, last_name=last, email=address)
+
+
+def _contacts(data: dict[str, Any]) -> list[InvestorContact]:
+    contacts: list[InvestorContact] = []
+    raw = data.get("contacts")
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                contact = _contact(item.get("first_name"), item.get("last_name"), item.get("email"),
+                                   full_name=item.get("name"))
+                if contact:
+                    contacts.append(contact)
+    single = _contact(data.get("contact_first_name"), data.get("contact_last_name"), data.get("contact_email"),
+                      full_name=data.get("contact_name"))
+    if single:
+        contacts.append(single)
+    unique: dict[str, InvestorContact] = {}
+    for contact in contacts:
+        unique.setdefault((contact.email or contact.name).lower(), contact)
+    return list(unique.values())
 
 
 @dataclass
@@ -257,6 +298,7 @@ def normalize_investor_row(
         "data_source": data_source,
         "is_synthetic": bool(is_synthetic) or _truthy(data.get("is_synthetic", False)),
         "notes": str(data["notes"]).strip() if "notes" in data else None,
+        "contacts": _contacts(data),
     }
     for list_field in _LIST_FIELDS:
         fields[list_field] = _as_list(data.get(list_field))
@@ -290,7 +332,10 @@ def _merge_group(group: list[InvestorRecord]) -> InvestorRecord:
     for other in group[1:]:
         for key, value in other.model_dump().items():
             current = base.get(key)
-            if key == "historical_investments":
+            if key == "contacts":
+                known = {(c.get("email") or "").lower() for c in current if c.get("email")}
+                current.extend(c for c in value if not c.get("email") or c["email"].lower() not in known)
+            elif key == "historical_investments":
                 seen = {(d["company"].lower(), str(d.get("stage")), d.get("year")) for d in current}
                 for deal in value:
                     marker = (deal["company"].lower(), str(deal.get("stage")), deal.get("year"))

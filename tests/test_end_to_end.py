@@ -127,6 +127,9 @@ def test_streamlit_workspace_shows_matches_and_rescores(samples, settings, tmp_p
     labels = {b.label for b in app.button}
     assert not labels & {"Apply corrections", "Looks right — continue", "Run matching", "Generate PDF"}
     assert app.session_state["report_cache"] is not None
+    downloads = [d.proto.label for d in app.get("download_button")]
+    assert "Download the one-page report (PDF)" in downloads
+    assert "Download all contacts and emails for Pipedrive (CSV)" in downloads
     # The first version is saved for TEN in the background.
     [holder] = app.session_state["deliveries"].values()
     holder["thread"].join(10)

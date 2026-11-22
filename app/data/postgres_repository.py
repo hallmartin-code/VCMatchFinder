@@ -63,6 +63,9 @@ SELECT
     MAX(r.research_summary)                                     AS research_summary,
     STRING_AGG(NULLIF(TRIM(CONCAT_WS(' ', r.first_name, r.last_name)), ''), ', '
                ORDER BY r.source_row)                           AS contacts,
+    JSON_AGG(JSON_BUILD_OBJECT('first_name', r.first_name, 'last_name', r.last_name,
+                               'email', r.email)
+             ORDER BY r.source_row)                             AS contact_list,
     COUNT(*)                                                    AS contact_count
 FROM rows r
 GROUP BY LOWER(r.display_name)
@@ -112,6 +115,8 @@ def row_to_record(row: dict[str, Any]) -> dict[str, Any]:
         "source_urls": [u.strip() for u in (row.get("research_sources") or "").split(";") if u.strip()],
         "last_verified": row.get("researched_on"),
         "notes": " | ".join(notes),
+        # Every contact on the list for this organization (excluded rows never reach here).
+        "contacts": list(row.get("contact_list") or []),
     }
 
 

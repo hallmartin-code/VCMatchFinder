@@ -58,6 +58,7 @@ from app.pipeline import (  # noqa: E402
     run_matching,
     save_outputs,
 )
+from app.reporting.crm_export import contact_rows, crm_csv  # noqa: E402
 from app.reporting.json_exporter import record_to_json  # noqa: E402
 from app.services.investor_data_service import (  # noqa: E402
     InvestorDataset,
@@ -522,14 +523,13 @@ def _toggle_contacted(investor_id: str) -> None:
     st.session_state.contacted = sorted(contacted ^ {investor_id})
 
 
-def _toggle_intro(match: InvestorMatch) -> None:
-    intro: dict[str, dict[str, Any]] = dict(st.session_state.intro_list)
-    if match.investor_id in intro:
-        del intro[match.investor_id]
+def _toggle_intro(investor_id: str, rows: list[dict[str, Any]]) -> None:
+    """Add or remove an investor; the list keeps its spreadsheet rows so they survive later re-scores."""
+    intro: dict[str, list[dict[str, Any]]] = dict(st.session_state.intro_list)
+    if investor_id in intro:
+        del intro[investor_id]
     else:
-        intro[match.investor_id] = {"name": match.investor_name, "type": match.investor_type_label,
-                                    "tier": TIER_LABELS[match.outreach_priority], "fit": match.fit_score,
-                                    "angle": match.outreach_angle, "why": match.rationale}
+        intro[investor_id] = rows
     st.session_state.intro_list = intro
 
 
@@ -537,7 +537,7 @@ def _exclude(name: str) -> None:
     st.session_state.excluded_extra = sorted(set(st.session_state.excluded_extra) | {name})
 
 
-def _render_card(rank: int, match: InvestorMatch, email: SampleEmail) -> None:
+def _render_card(rank: int, match: InvestorMatch, email: SampleEmail, rows: list[dict[str, Any]]) -> None:
     investor = match.kind == "investor"
     contacted = match.investor_id in st.session_state.contacted
     listed = match.investor_id in st.session_state.intro_list
@@ -559,6 +559,11 @@ def _render_card(rank: int, match: InvestorMatch, email: SampleEmail) -> None:
         with st.expander("See scoring"):
             _match_details(match)
         with st.expander(f"Sample email for this {match.investor_type_label.lower()}"):
+            primary = rows[0] if rows else None
+            if primary and (primary["Person name"] or primary["Email"]):
+                to = primary["Person name"] + (f" <{primary['Email']}>" if primary["Email"] else "")
+                more = f" (+{len(rows) - 1} more in the Pipedrive download)" if len(rows) > 1 else ""
+                st.markdown(f"**To:** {theme.safe_md(to.strip())}{more}")
             st.markdown(f"**Subject:** {theme.safe_md(email.subject)}")
             st.text(email.body)
             st.caption("A draft to review and edit: fill in the [bracketed] parts before sending. "
@@ -574,24 +579,17 @@ def _render_card(rank: int, match: InvestorMatch, email: SampleEmail) -> None:
                        on_click=_toggle_contacted, args=(match.investor_id,), width="stretch")
         cols[2].button("On intro list ✓" if listed else "Add to intro list",
                        help="Collect intros to export for Pipedrive (click again to remove)",
-                       key=f"intro_{match.investor_id}", on_click=_toggle_intro, args=(match,), width="stretch")
+                       key=f"intro_{match.investor_id}", on_click=_toggle_intro, args=(match.investor_id, rows),
+                       width="stretch")
         cols[3].button("Exclude", help="Exclude this investor and re-score", key=f"exclude_{match.investor_id}",
                        on_click=_exclude, args=(match.investor_name,), width="stretch")
 
 
-def _intro_list_csv(company: CompanyProfile) -> str:
-    """The intro list in columns Pipedrive's spreadsheet import maps directly (organization + deal)."""
-    rows = [{
-        "Organization name": item["name"],
-        "Deal title": f"{company.display_name} intro – {item['name']}",
-        "Investor type": item["type"],
-        "Priority": item["tier"],
-        "Fit score": item["fit"],
-        "Status": "Already contacted" if investor_id in st.session_state.contacted else "To introduce",
-        "Outreach angle": item["angle"],
-        "Why it fits": item["why"],
-    } for investor_id, item in st.session_state.intro_list.items()]
-    return pd.DataFrame(rows).to_csv(index=False)
+def _crm_download(label: str, rows: list[dict[str, Any]], company: CompanyProfile, suffix: str, *,
+                  key: str) -> None:
+    data = crm_csv(rows, contacted=st.session_state.contacted, intro_list=st.session_state.intro_list)
+    st.download_button(label, data, file_name=f"{company.display_name} {suffix}.csv", mime="text/csv",
+                       on_click="ignore", key=key)
 
 
 def render_results(outcome: MatchOutcome, config: MatchingConfig, dataset: InvestorDataset,
@@ -622,19 +620,37 @@ def render_results(outcome: MatchOutcome, config: MatchingConfig, dataset: Inves
         st.error("These named investors come from a SYNTHETIC test dataset and are fictitious.")
     st.info(f"**Recommended next action:** {theme.safe_md(outcome.next_action)}")
 
+    needs_lead = company.needs_lead(outcome.preferences.lead_required)
+    emails: dict[str, SampleEmail] = {}
+    crm_rows: dict[str, list[dict[str, Any]]] = {}
+    for match in rows:
+        inv = outcome.records.get(match.investor_id)
+
+        def draft(contact: Any, match: InvestorMatch = match, inv: Any = inv) -> SampleEmail:
+            return sample_email(match, company, inv=inv, needs_lead=needs_lead, today=outcome.today, contact=contact)
+
+        emails[match.investor_id] = draft(inv.primary_contact() if inv else None)
+        if match.kind == "investor":  # profiles are not organizations a CRM can hold
+            crm_rows[match.investor_id] = contact_rows(match, company, inv, draft)
+
+    if crm_rows:
+        everyone = [row for investor_rows in crm_rows.values() for row in investor_rows]
+        people = sum(1 for row in everyone if row["Person name"] or row["Email"])
+        theme.label(f"Pipedrive export · {people} contacts at {len(crm_rows)} target investors")
+        _crm_download("Download all contacts and emails for Pipedrive (CSV)", everyone, company,
+                      "Pipedrive contacts and emails", key="crm_all")
+        st.caption("One row per contact on the investor list, each with the sample email addressed to that "
+                   "person, plus the investor's fit and priority, ready for Pipedrive's spreadsheet import.")
     intro = st.session_state.intro_list
     if intro:
         theme.label(f"Intro list ({len(intro)})")
-        st.caption(", ".join(item["name"] for item in intro.values()))
-        st.download_button("Download intro list for Pipedrive (CSV)", _intro_list_csv(company),
-                           file_name=f"{company.display_name} intro list.csv", mime="text/csv",
-                           on_click="ignore")
+        st.caption(", ".join(investor_rows[0]["Organization name"] for investor_rows in intro.values()))
+        _crm_download("Download intro list for Pipedrive (CSV)",
+                      [row for investor_rows in intro.values() for row in investor_rows], company,
+                      "Pipedrive intro list", key="crm_intro")
 
-    needs_lead = company.needs_lead(outcome.preferences.lead_required)
     for rank, match in enumerate(rows, start=1):
-        email = sample_email(match, company, inv=outcome.records.get(match.investor_id), needs_lead=needs_lead,
-                             today=outcome.today)
-        _render_card(rank, match, email)
+        _render_card(rank, match, emails[match.investor_id], crm_rows.get(match.investor_id, []))
 
     with st.expander("Ideal investor profile"):
         st.markdown("\n".join(f"- {theme.safe_md(point)}" for point in outcome.iip.summary_points))

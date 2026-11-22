@@ -70,3 +70,14 @@ def test_profiles_use_a_placeholder_name(outcome):
     profile = outcome.run.archetype_matches[0]
     email = sample_email(profile, outcome.company, today=TODAY)
     assert "[Investor name]" in email.body and profile.investor_name not in email.body
+
+
+def test_greets_the_listed_contact(outcome):
+    from app.models.investor import InvestorContact
+
+    match = next(m for m in outcome.run.matches if m.investor_name == "Aldermoor Health Ventures")
+    email = sample_email(match, outcome.company, today=TODAY,
+                         contact=InvestorContact(first_name="Dana", last_name="Reyes", email="dana@x.example"))
+    assert email.body.startswith("Hi Dana,")
+    assert sample_email(match, outcome.company, today=TODAY, contact=InvestorContact(email="x@y.example")) \
+        .body.startswith("Hi [First name],")  # no first name on the list: keep the placeholder

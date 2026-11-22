@@ -20,6 +20,8 @@ ROW = {
     "researched_on": date(2026, 11, 21),
     "research_sources": "https://example.org/a; https://example.org/b",
     "research_summary": "Sector: medtech [1]", "contacts": "A Person, B Person", "contact_count": 2,
+    "contact_list": [{"first_name": "A", "last_name": "Person", "email": "a@ctan.example"},
+                     {"first_name": "B", "last_name": "Person", "email": None}],
 }
 
 
@@ -36,6 +38,8 @@ def test_row_maps_to_investor_record(monkeypatch):
     assert inv.geo_tokens() == {"US-TX"}  # the parenthetical example is not a mandate
     assert inv.has_verification and inv.last_known_investment == date(2026, 6, 3)
     assert "[1]" not in (inv.notes or "")
+    assert [c.name for c in inv.contacts] == ["A Person", "B Person"]
+    assert inv.primary_contact().email == "a@ctan.example"
 
 
 def test_unknowns_stay_unknown_and_paused_means_not_investing(monkeypatch):
