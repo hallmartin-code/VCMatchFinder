@@ -1,7 +1,7 @@
 """End-to-end orchestration shared by the Streamlit UI, the CLI and the tests.
 
     analyze_deck  ->  (user review / corrections)  ->  run_matching  ->  build_record
-                  ->  generate_report  ->  save_outputs (storage consent only)
+                  ->  generate_report  ->  save_outputs
 
 Each step is separately callable so the UI can pause for human review between them.
 """
@@ -24,7 +24,6 @@ from app.intelligence.analyzer import data_gaps, explain_matches, recommended_ne
 from app.matching.investor_profile import build_ideal_investor_profile
 from app.matching.ranking import rank_investors
 from app.models.company import CompanyProfile, InvestorPreferences
-from app.models.consent import ConsentRecord
 from app.models.investor import InvestorRecord
 from app.models.match import IdealInvestorProfile, MatchRun
 from app.models.record import (
@@ -93,14 +92,12 @@ class EndToEndResult:
 def analyze_deck(
     *,
     settings: Settings,
-    consent: ConsentRecord,
     deck_path: Path | None = None,
     upload: tuple[str, bytes] | None = None,
     notes_text: str = "",
     llm: LLMService | None = None,
 ) -> AnalysisSession:
-    """Parse a deck and extract the normalized company record (requires analysis consent)."""
-    consent.require_analysis()
+    """Parse a deck and extract the normalized company record."""
     if upload is not None:
         filename, data = upload
         doc = parse_uploaded_deck(filename, data, max_bytes=settings.max_upload_bytes)
@@ -115,12 +112,12 @@ def analyze_deck(
     llm_notes: list[str] = []
     extra: list[dict[str, Any]] = []
     llm_used = False
-    if llm is not None and llm.allowed(consent):
+    if llm is not None and llm.configured:
         images = None
         if doc.is_scanned and doc.source_format == "pdf" and raw_bytes is not None:
             images = render_pages_png(raw_bytes, [p.number for p in doc.pages])
         try:
-            extraction = llm.extract_fields(doc, consent, images=images)
+            extraction = llm.extract_fields(doc, images=images)
             extra.append(extraction.fields)
             llm_notes.extend(extraction.warnings)
             llm_used = True
@@ -140,13 +137,11 @@ def run_matching(
     preferences: InvestorPreferences,
     dataset: InvestorDataset,
     config: MatchingConfig,
-    consent: ConsentRecord,
     *,
     today: date | None = None,
     llm: LLMService | None = None,
     deck_scanned: bool = False,
 ) -> MatchOutcome:
-    consent.require_analysis()
     today = today or date.today()
     iip = build_ideal_investor_profile(company, preferences)
     ranking = rank_investors(dataset.investors, company, preferences, config, iip, today=today)
@@ -155,9 +150,9 @@ def run_matching(
 
     polished = 0
     notes: list[str] = []
-    if llm is not None and llm.allowed(consent):
+    if llm is not None and llm.configured:
         try:
-            polished = llm.polish_matches(ranking.run.top(config.ranking.top_n), company, consent)
+            polished = llm.polish_matches(ranking.run.top(config.ranking.top_n), company)
         except LLMUnavailableError as exc:
             notes.append(f"Wording polish skipped: {exc} Deterministic text was used.")
         rejected = getattr(llm, "last_rejections", [])
@@ -165,7 +160,7 @@ def run_matching(
             notes.append(f"Claude's wording for {len(rejected)} match(es) used terms not found in the evidence "
                          f"and was replaced by the engine's own text: {'; '.join(rejected[:4])}.")
 
-    next_action = recommended_next_action(ranking.run, company, preferences, consent,
+    next_action = recommended_next_action(ranking.run, company, preferences,
                                           manual_fields=manual_entry_fields(company))
     gaps = data_gaps(company, ranking.run, dataset, deck_scanned=deck_scanned)
     return MatchOutcome(company=company, preferences=preferences, iip=iip, run=ranking.run,
@@ -180,7 +175,6 @@ def build_record(
     outcome: MatchOutcome,
     *,
     config: MatchingConfig,
-    consent: ConsentRecord,
     settings: Settings,
     session: AnalysisSession | None = None,
     user: UserInfo | None = None,
@@ -248,7 +242,6 @@ def build_record(
         data_gaps=outcome.gaps,
         investor_dataset=DatasetSummary(**outcome.dataset.summary()),
         warnings=list(dict.fromkeys(warnings)),
-        consent=consent,
         external_processing=external,
     )
 
@@ -268,10 +261,9 @@ def generate_report(record: TenCapitalRecord, *, organization: str = "TEN Capita
 
 
 def notify_results(record: TenCapitalRecord, pdf_bytes: bytes | None, *, settings: Settings,
-                   consent: ConsentRecord, transport: Transport | None = None
-                   ) -> tuple[NotificationOutcome, TenCapitalRecord]:
+                   transport: Transport | None = None) -> tuple[NotificationOutcome, TenCapitalRecord]:
     """Email the results to the configured inbox and record what happened. Never raises."""
-    outcome = send_report_email(record, pdf_bytes, settings=settings, consent=consent, transport=transport)
+    outcome = send_report_email(record, pdf_bytes, settings=settings, transport=transport)
     return outcome, record.model_copy(update={"notification": outcome})
 
 
@@ -279,10 +271,8 @@ def output_basename(record: TenCapitalRecord) -> str:
     return f"{slugify(record.company.name or 'company')}_{record.analysis_id[:8]}_investor_matching"
 
 
-def save_outputs(record: TenCapitalRecord, pdf_bytes: bytes | None, out_dir: Path,
-                 consent: ConsentRecord) -> tuple[Path, Path | None]:
-    """Write the JSON (and PDF) to disk. Requires storage consent."""
-    consent.require_storage()
+def save_outputs(record: TenCapitalRecord, pdf_bytes: bytes | None, out_dir: Path) -> tuple[Path, Path | None]:
+    """Write the JSON (and PDF) to disk."""
     out_dir.mkdir(parents=True, exist_ok=True)
     base = output_basename(record)
     pdf_path = None
@@ -300,7 +290,6 @@ def run_end_to_end(
     deck_path: Path,
     *,
     settings: Settings,
-    consent: ConsentRecord,
     preferences: InvestorPreferences | None = None,
     dataset: InvestorDataset | None = None,
     config: MatchingConfig | None = None,
@@ -316,17 +305,17 @@ def run_end_to_end(
     config = config or settings.matching_config()
     preferences = preferences or InvestorPreferences()
     dataset = dataset if dataset is not None else load_default_dataset(settings)
-    session = analyze_deck(settings=settings, consent=consent, deck_path=deck_path, notes_text=notes_text, llm=llm)
-    outcome = run_matching(session.company, preferences, dataset, config, consent, today=today, llm=llm,
+    session = analyze_deck(settings=settings, deck_path=deck_path, notes_text=notes_text, llm=llm)
+    outcome = run_matching(session.company, preferences, dataset, config, today=today, llm=llm,
                            deck_scanned=session.extraction.deck_scanned)
-    record = build_record(outcome, config=config, consent=consent, settings=settings, session=session,
+    record = build_record(outcome, config=config, settings=settings, session=session,
                           user=user, timestamp=timestamp)
     report, record = generate_report(record, organization=settings.report_organization)
     if notify:
-        _outcome, record = notify_results(record, report.pdf_bytes, settings=settings, consent=consent,
+        _outcome, record = notify_results(record, report.pdf_bytes, settings=settings,
                                           transport=email_transport)
     json_path = pdf_path = None
     if out_dir is not None:
-        json_path, pdf_path = save_outputs(record, report.pdf_bytes, out_dir, consent)
+        json_path, pdf_path = save_outputs(record, report.pdf_bytes, out_dir)
     return EndToEndResult(record=record, pdf_bytes=report.pdf_bytes, report=report, session=session,
                           outcome=outcome, json_path=json_path, pdf_path=pdf_path)

@@ -8,8 +8,6 @@ outreach: recipients come only from configuration, never from the UI.
 Rules:
 
 * Off unless ``TEN_NOTIFY_ENABLED=true`` and ``RESEND_API_KEY`` is set.
-* Follows the storage consent by default (``TEN_NOTIFY_REQUIRES_STORAGE_CONSENT``): an
-  emailed copy of a confidential analysis is a retained copy.
 * Sending never raises and never fails a report; the outcome is recorded in the JSON.
 * The API key travels only in the Authorization header and is never logged.
 
@@ -31,7 +29,6 @@ from html import escape
 from typing import Any
 
 from app.config import Settings
-from app.models.consent import ConsentRecord
 from app.models.record import NotificationOutcome, TenCapitalRecord
 from app.reporting.pdf_generator import ReportContent
 from app.utils.logging import get_logger
@@ -210,7 +207,6 @@ def send_report_email(
     pdf_bytes: bytes | None,
     *,
     settings: Settings,
-    consent: ConsentRecord,
     transport: Transport | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> NotificationOutcome:
@@ -224,9 +220,6 @@ def send_report_email(
         return base.model_copy(update={"skipped_reason": "no RESEND_API_KEY configured"})
     if not recipients:
         return base.model_copy(update={"skipped_reason": "no recipients configured (TEN_NOTIFY_TO)"})
-    if settings.notify_requires_storage_consent and not consent.data_storage_consent:
-        return base.model_copy(update={
-            "skipped_reason": "storage consent was not granted, and results are only emailed with it"})
 
     subject, html_body, text_body = render_email(record, subject_prefix=settings.notify_subject_prefix)
     stem = f"{slugify(record.company.name or 'company')}_{record.analysis_id[:8]}_investor_matching"

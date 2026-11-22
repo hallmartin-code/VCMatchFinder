@@ -15,7 +15,6 @@ from app.intelligence.outreach import (
 )
 from app.matching.taxonomy import REGULATED_SUBSECTORS
 from app.models.company import FIELD_SPECS, CompanyProfile, InvestorPreferences
-from app.models.consent import ConsentRecord
 from app.models.investor import InvestorRecord
 from app.models.match import MatchRun
 
@@ -45,14 +44,12 @@ def _join(names: list[str]) -> str:
 
 
 def recommended_next_action(run: MatchRun, company: CompanyProfile, preferences: InvestorPreferences,
-                            consent: ConsentRecord, *, manual_fields: list[str]) -> str:
+                            *, manual_fields: list[str]) -> str:
     """The single most important next step for investor outreach."""
-    suffix = "" if consent.outreach_consent else \
-        " Outreach needs separate approval — this report contacts no one."
     critical = [FIELD_SPECS[f].label.lower() for f in manual_fields if FIELD_SPECS[f].ranking_impact >= 3]
     if critical:
         return (f"Confirm the {_join(critical)} with the company before any outreach — these drive stage "
-                f"and check-size fit and could reorder every match.{suffix}")
+                "and check-size fit and could reorder every match.")
     needs_lead = company.needs_lead(preferences.lead_required)
     tier1 = [m for m in run.matches if m.outreach_priority == "tier_1"]
     if tier1:
@@ -61,17 +58,17 @@ def recommended_next_action(run: MatchRun, company: CompanyProfile, preferences:
             regulated = company.subsector.value in REGULATED_SUBSECTORS
             package = "deck, financial model, cap table, terms" + (", regulatory roadmap" if regulated else "")
             return (f"Secure a lead: after partner review, request warm introductions to {names} with a lead "
-                    f"package ({package}).{suffix}")
-        return f"After partner review, request warm introductions to {names} with the deck and executive summary.{suffix}"
+                    f"package ({package}).")
+        return f"After partner review, request warm introductions to {names} with the deck and executive summary."
     tier2 = [m for m in run.matches if m.outreach_priority == "tier_2"]
     if tier2:
         names = _join([m.investor_name for m in tier2[:2]])
         return (f"Verify the mandates of {names} (check size, current fund activity) before outreach; no "
-                f"investor yet qualifies as Contact Now.{suffix}")
+                "investor yet qualifies as Contact Now.")
     if run.archetype_matches:
         return (f"Source named investors matching the top profile ({run.archetype_matches[0].investor_name}); "
-                f"no named investor in the dataset is a strong current-round fit.{suffix}")
-    return f"Add investor data or complete the missing company fields, then re-run the match.{suffix}"
+                "no named investor in the dataset is a strong current-round fit.")
+    return "Add investor data or complete the missing company fields, then re-run the match."
 
 
 def data_gaps(company: CompanyProfile, run: MatchRun, dataset: InvestorDataset | None, *,

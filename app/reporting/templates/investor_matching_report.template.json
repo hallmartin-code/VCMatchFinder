@@ -335,7 +335,7 @@
       "component": "callout",
       "source": "recommended_next_action",
       "max_chars": 320,
-      "placeholder": "[RECOMMENDED NEXT ACTION — the single most important outreach step; ends with the outreach-approval caveat when outreach consent is not recorded]"
+      "placeholder": "[RECOMMENDED NEXT ACTION — the single most important outreach step]"
     },
     {
       "id": "data_quality",
@@ -449,6 +449,6 @@
     "match_fields": ["rank", "investor", "investor_id", "investor_type", "kind", "fit_score", "adjusted_score", "ranking_score", "confidence", "confidence_score", "evidence_quality", "rationale", "investment_evidence", "likely_concerns", "outreach_angle", "required_materials", "outreach_priority", "outreach_priority_key", "priority_reason", "preference_matches", "score_breakdown", "data_source", "is_synthetic", "text_source"],
     "ideal_investor_profile_fields": ["target_stages", "recommended_categories", "excluded_categories", "sector_specialization", "geographic_fit", "lead_check_range", "follow_check_range", "lead_required", "lead_basis", "strategic_vs_financial", "technical_expertise", "commercialization_expertise", "regulatory_expertise", "cross_border_capability", "follow_on_capacity", "strategic_partnership_potential", "customer_channel_access", "summary_points", "basis"],
     "required_materials": ["Executive summary", "Pitch deck", "Financial model", "Cap table", "Investment terms", "Regulatory roadmap", "Clinical results", "IP summary", "Customer references", "Technical validation", "Use-of-funds schedule", "Market analysis", "Data room"],
-    "record_sections": ["schema_version", "analysis_id", "timestamp", "user", "source_deck", "company", "company_provenance", "investor_preferences", "match_criteria", "scoring_policy", "ideal_investor_profile", "top_matches", "rejected_investors", "recommended_next_action", "data_gaps", "investor_dataset", "warnings", "consent", "external_processing", "report", "notification"]
+    "record_sections": ["schema_version", "analysis_id", "timestamp", "user", "source_deck", "company", "company_provenance", "investor_preferences", "match_criteria", "scoring_policy", "ideal_investor_profile", "top_matches", "rejected_investors", "recommended_next_action", "data_gaps", "investor_dataset", "warnings", "external_processing", "report", "notification"]
   }
 }

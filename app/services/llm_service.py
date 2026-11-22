@@ -1,7 +1,7 @@
 """Optional external model: Anthropic Claude for field extraction and wording polish.
 
 Off by default. It runs only when all three hold: ``TEN_LLM_ENABLED=true``, an API key is
-configured, and the user granted external-processing consent for the run. Everything the
+configured. Everything the
 model returns is checked locally before it is used:
 
 * Extracted fields must cite a slide whose extracted text contains the quoted evidence and
@@ -23,13 +23,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import Settings
-from app.errors import ConsentError, LLMUnavailableError
+from app.errors import LLMUnavailableError
 from app.extraction.patterns import money_mentions
 from app.ingestion.models import DeckDocument
 from app.intelligence.outreach import proof_points
 from app.matching.taxonomy import parse_stage, stage_label
 from app.models.company import CompanyProfile
-from app.models.consent import ConsentRecord
 from app.models.match import InvestorMatch
 from app.reporting.template import load_template
 from app.utils.logging import get_logger
@@ -247,21 +246,16 @@ class LLMService:
     def configured(self) -> bool:
         return self._client_obj is not None or self.settings.llm_configured
 
-    def allowed(self, consent: ConsentRecord) -> bool:
-        return self.configured and consent.external_processing_consent
-
     def disclosure(self) -> str:
         return (f"When enabled, deck text (and, for scanned decks, slide images) and the draft match "
                 f"explanations are sent to {PROVIDER}'s API (model {self.model}) for field extraction "
-                "and wording. Nothing is sent without external-processing consent.")
+                "and wording.")
 
-    def _require(self, consent: ConsentRecord) -> None:
+    def _require(self) -> None:
         if not self.configured:
             raise LLMUnavailableError(
                 "External model is not configured (set TEN_LLM_ENABLED=true and ANTHROPIC_API_KEY)."
             )
-        if not consent.external_processing_consent:
-            raise ConsentError("External-processing consent was not granted; nothing was sent.")
 
     def _client(self) -> Any:
         if self._client_obj is None:
@@ -332,9 +326,9 @@ class LLMService:
             used += len(block)
         return "\n\n".join(parts), warnings
 
-    def extract_fields(self, doc: DeckDocument, consent: ConsentRecord, *,
+    def extract_fields(self, doc: DeckDocument, *,
                        images: list[tuple[int, bytes]] | None = None) -> LLMExtraction:
-        self._require(consent)
+        self._require()
         text, warnings = self._deck_text(doc)
         content: list[dict[str, Any]] = []
         for number, png in (images or [])[:MAX_VISION_PAGES]:
@@ -408,10 +402,9 @@ class LLMService:
 
     # ------------------------------------------------------------------- polish
 
-    def polish_matches(self, matches: list[InvestorMatch], company: CompanyProfile,
-                       consent: ConsentRecord) -> int:
+    def polish_matches(self, matches: list[InvestorMatch], company: CompanyProfile) -> int:
         """Rewrite rationale/angle wording; reject any output that adds a name or number."""
-        self._require(consent)
+        self._require()
         self.last_rejections = []
         if not matches:
             return 0

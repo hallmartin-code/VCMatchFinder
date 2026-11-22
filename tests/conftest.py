@@ -15,7 +15,6 @@ if str(ROOT) not in sys.path:
 from app.config import MatchingConfig, Settings  # noqa: E402
 from app.extraction.company_extractor import extract_company  # noqa: E402
 from app.ingestion.deck_parser import parse_deck  # noqa: E402
-from app.models.consent import ConsentRecord  # noqa: E402
 from app.services.investor_data_service import load_investor_dataset  # noqa: E402
 
 DATASET_PATH = ROOT / "sample_data" / "investors_synthetic.json"
@@ -73,7 +72,3 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(_env_file=None, llm_enabled=False, investor_data_paths=str(DATASET_PATH),
                     output_dir=tmp_path / "output")
 
-
-@pytest.fixture
-def consent() -> ConsentRecord:
-    return ConsentRecord(analysis_consent=True, data_storage_consent=True, source="test")

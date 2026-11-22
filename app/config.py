@@ -158,8 +158,6 @@ class Settings(BaseSettings):
     notify_from: str = "TEN Capital Investor Matching <reports@tencapital.group>"
     notify_reply_to: str = ""
     notify_subject_prefix: str = "[TEN Capital]"
-    #: An emailed copy is a retained copy, so by default it follows the storage consent.
-    notify_requires_storage_consent: bool = True
     notify_timeout_seconds: float = 30.0
 
     def notify_recipients(self) -> list[str]:
@@ -185,7 +183,7 @@ class Settings(BaseSettings):
 
     @property
     def llm_configured(self) -> bool:
-        """True when an external model may be used at all (consent is checked per run)."""
+        """True when the external model is enabled and has an API key."""
         key = self.anthropic_api_key.get_secret_value() if self.anthropic_api_key else ""
         return bool(self.llm_enabled and key.strip())
 

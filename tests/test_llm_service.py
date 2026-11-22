@@ -15,13 +15,10 @@ except ImportError:  # pragma: no cover - depends on the installed SDK major ver
     import httpx as http_lib
 
 from app.config import Settings
-from app.errors import ConsentError, LLMUnavailableError
+from app.errors import LLMUnavailableError
 from app.ingestion.deck_parser import parse_deck
-from app.models.consent import ConsentRecord
 from app.pipeline import analyze_deck
 from app.services.llm_service import FALLBACK_BETA, LLMService, novel_tokens
-
-ALLOW = ConsentRecord(analysis_consent=True, external_processing_consent=True)
 
 
 class FakeMessages:
@@ -41,13 +38,12 @@ def service(messages: FakeMessages) -> LLMService:
     return LLMService(settings, client=SimpleNamespace(beta=SimpleNamespace(messages=messages)))
 
 
-def test_disabled_by_default_and_requires_consent():
+def test_disabled_by_default():
     llm = LLMService(Settings(_env_file=None, llm_enabled=False))
-    assert not llm.configured and not llm.allowed(ALLOW)
-    fake = service(FakeMessages({"fields": []}))
-    assert not fake.allowed(ConsentRecord(analysis_consent=True))
-    with pytest.raises(ConsentError):
-        fake.extract_fields(parse_deck_stub(), ConsentRecord(analysis_consent=True))
+    assert not llm.configured
+    with pytest.raises(LLMUnavailableError):
+        llm.extract_fields(parse_deck_stub())
+    assert service(FakeMessages({"fields": []})).configured
 
 
 def parse_deck_stub():
@@ -63,7 +59,7 @@ def test_extraction_keeps_grounded_values_and_discards_fabrications(samples):
         {"field": "lead_investor", "value": "Acme Ventures", "slide": 40, "quote": "Led by Acme Ventures"},
         {"field": "round_type", "value": "Series A", "slide": 12, "quote": "We are raising a $6M Series A"},
     ]})
-    result = service(messages).extract_fields(doc, ALLOW)
+    result = service(messages).extract_fields(doc)
     assert result.fields["raise_amount"].value == 6e6 and result.fields["raise_amount"].method == "llm"
     assert result.fields["company_stage"].value == "series_a"
     assert "revenue" not in result.fields and "lead_investor" not in result.fields
@@ -76,7 +72,7 @@ def test_extraction_keeps_grounded_values_and_discards_fabrications(samples):
 
 def test_api_failure_falls_back_to_deterministic_extraction(samples, settings):
     error = anthropic.APIConnectionError(request=http_lib.Request("POST", "https://api.anthropic.com/v1/messages"))
-    session = analyze_deck(settings=settings, consent=ALLOW, deck_path=samples["pdf"],
+    session = analyze_deck(settings=settings, deck_path=samples["pdf"],
                            llm=service(FakeMessages(error=error)))
     assert not session.llm_used
     assert any("External extraction skipped" in n for n in session.llm_notes)
@@ -86,7 +82,7 @@ def test_api_failure_falls_back_to_deterministic_extraction(samples, settings):
 @pytest.mark.parametrize(("payload", "stop"), [("{not json", "end_turn"), ({"fields": []}, "refusal")])
 def test_bad_or_refused_responses_raise(payload, stop):
     with pytest.raises(LLMUnavailableError):
-        service(FakeMessages(payload, stop_reason=stop)).extract_fields(parse_deck_stub(), ALLOW)
+        service(FakeMessages(payload, stop_reason=stop)).extract_fields(parse_deck_stub())
 
 
 def test_polish_rejects_new_names_and_numbers(lumora_company, dataset, config):
@@ -95,8 +91,7 @@ def test_polish_rejects_new_names_and_numbers(lumora_company, dataset, config):
     from app.models.company import InvestorPreferences
     from app.pipeline import run_matching
 
-    outcome = run_matching(lumora_company, InvestorPreferences(), dataset, config,
-                           ConsentRecord(analysis_consent=True), today=TODAY)
+    outcome = run_matching(lumora_company, InvestorPreferences(), dataset, config, today=TODAY)
     matches = outcome.run.matches[:2]
     good, bad = matches
     original_bad = bad.outreach_angle
@@ -107,7 +102,7 @@ def test_polish_rejects_new_names_and_numbers(lumora_company, dataset, config):
         {"id": bad.investor_id, "rationale": "Backed Zentrix Bio in 2019.",
          "outreach_angle": "Mention their $40M fund."},
     ]})
-    count = service(messages).polish_matches(matches, lumora_company, ALLOW)
+    count = service(messages).polish_matches(matches, lumora_company)
     assert count == 1
     assert good.text_source == "llm_polished"
     assert good.likely_concerns[0] == "Customer concentration risk"

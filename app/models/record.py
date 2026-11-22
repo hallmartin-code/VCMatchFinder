@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.company import InvestorPreferences
-from app.models.consent import ConsentRecord
 from app.models.match import (
     TIER_LABELS,
     CriterionScore,
@@ -17,7 +16,7 @@ from app.models.match import (
     RejectedInvestor,
 )
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 class UserInfo(BaseModel):
@@ -176,7 +175,6 @@ class TenCapitalRecord(BaseModel):
     data_gaps: list[str] = Field(default_factory=list)
     investor_dataset: DatasetSummary = Field(default_factory=DatasetSummary)
     warnings: list[str] = Field(default_factory=list)
-    consent: ConsentRecord
     external_processing: ExternalProcessing = Field(default_factory=ExternalProcessing)
     report: ReportMeta = Field(default_factory=ReportMeta)
     notification: NotificationOutcome = Field(default_factory=NotificationOutcome)

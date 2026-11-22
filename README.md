@@ -14,7 +14,7 @@ The engine is built around a few non-negotiable rules:
 | Explain every score | Scores are computed by code from nine rules. Each criterion keeps its raw score, weighted score, evidence, source, evidence level, confidence and missing information. |
 | Missing data reduces confidence | A criterion that cannot be judged scores 40/100 (below any positive evidence) and contributes zero confidence. |
 | Categories over fabricated names | When named-investor evidence is thin, the engine ranks investor **archetypes** (e.g. "Diagnostics-focused venture capital fund"), clearly labeled as profiles. |
-| Human review before outreach | The application never emails, messages or otherwise contacts anyone. Outreach consent is recorded separately and only changes the report's caveat. |
+| Human review before outreach | The application never emails, messages or otherwise contacts anyone. |
 
 ---
 
@@ -30,7 +30,7 @@ The engine is built around a few non-negotiable rules:
 8. [Scoring methodology](#scoring-methodology)
 9. [PDF report](#pdf-report)
 10. [JSON record](#json-record)
-11. [Privacy, consent and security](#privacy-consent-and-security)
+11. [Privacy and security](#privacy-and-security)
 12. [Testing](#testing)
 13. [Known limitations](#known-limitations)
 
@@ -43,8 +43,7 @@ pip install -r requirements.txt
 python sample_data/make_samples.py          # regenerate the synthetic sample decks (optional)
 streamlit run app/main.py                   # web UI
 # or, headless:
-python -m app.cli sample_data/lumora_diagnostics_series_a.pdf \
-    --consent-analysis --consent-storage --out output
+python -m app.cli sample_data/lumora_diagnostics_series_a.pdf --out output
 ```
 
 The bundled investor dataset (`sample_data/investors_synthetic.json`) is **synthetic**: every
@@ -65,7 +64,7 @@ app/
   errors.py               User-facing exception hierarchy
   ingestion/              pdf_parser.py, ppt_parser.py, deck_parser.py, models.py
   extraction/             patterns.py (cue engine), financial_, traction_, company_extractor.py
-  models/                 company.py, investor.py, match.py, consent.py, record.py (Pydantic)
+  models/                 company.py, investor.py, match.py, record.py (Pydantic)
   matching/               taxonomy.py, investor_profile.py, filters.py, scoring.py,
                           confidence.py, ranking.py
   intelligence/           outreach.py, concerns.py, analyzer.py
@@ -120,7 +119,7 @@ copy .env.example .env                               # then edit as needed
 | `TEN_LLM_TIMEOUT_SECONDS` | `60` | Per-request timeout. |
 | `TEN_INVESTOR_DATA_PATHS` | `sample_data/investors_synthetic.json` | Semicolon-separated CSV/JSON datasets loaded by default. |
 | `TEN_MAX_UPLOAD_MB` | `50` | Deck upload limit. |
-| `TEN_OUTPUT_DIR` | `output` | Where outputs are written (only with storage consent). |
+| `TEN_OUTPUT_DIR` | `output` | Where outputs are written. |
 | `TEN_WEIGHTS_FILE` | `config/matching.toml` | Matching configuration. |
 | `TEN_LOG_LEVEL` | `INFO` | Log level. Logs never contain deck text. |
 | `TEN_REPORT_ORGANIZATION` | `TEN Capital Network` | Name in the report footer. |
@@ -161,9 +160,8 @@ JetBrains Mono.
 - **Disclosures:** the upload limit, email recipient and Claude model shown on the landing card
   are read from live settings.
 
-1. **Upload deck and consent.** Choose a PDF/PPTX/PPT and optionally add company information
-   (treated as user-supplied and preferred over deck text). Analysis consent is required;
-   storage, outreach and external-processing consent are separate checkboxes.
+1. **Upload deck.** Choose a PDF/PPTX/PPT and optionally add company information
+   (treated as user-supplied and preferred over deck text).
 2. **Review and correct.** Every extracted field is shown with its source, slide/page and
    confidence. Fields that materially affect the ranking and were not found are marked
    *Missing – enter manually*. Edited values become `user_supplied`.
@@ -172,8 +170,8 @@ JetBrains Mono.
 4. **Run matching and review.** The Ideal Investor Profile, ranked matches, per-criterion
    score breakdowns, the hard-filter audit, and **Recalculate** / **Exclude investor** actions.
    The sidebar adjusts weights.
-5. **Export.** **Generate PDF** and **Download JSON record**. With storage consent the
-   files are also written to `TEN_OUTPUT_DIR`.
+5. **Export.** **Generate PDF** and **Download JSON record**. The files are also
+   written to `TEN_OUTPUT_DIR`.
 
 ### Command line
 
@@ -182,11 +180,10 @@ python -m app.cli DECK [--investors FILE ...] [--no-default-investors]
                   [--prefer-type TYPE ...] [--exclude-type TYPE ...] [--prefer-geo GEO ...]
                   [--exclude-investor NAME ...] [--lead-required auto|yes|no]
                   [--notes TEXT] [--weights TOML] [--today YYYY-MM-DD]
-                  --consent-analysis [--consent-storage --out DIR]
-                  [--consent-outreach] [--consent-external]
+                  [--out DIR] [--no-email]
 ```
 
-Exit codes: `0` success, `1` actionable error (bad file, unreadable dataset), `2` missing consent.
+Exit codes: `0` success, `1` actionable error (bad file, unreadable dataset).
 
 ### Deploying to Railway
 
@@ -222,19 +219,15 @@ profile, ranked matches, next action and data quality, with the one-page PDF and
 attached.
 - **Internal only.** Recipients come only from configuration; nothing in the UI can change
   them, and no investor is ever emailed.
-- **Follows storage consent.** An emailed copy is a retained copy, so an email is sent only
-  when the user grants storage consent. Set `TEN_NOTIFY_REQUIRES_STORAGE_CONSENT=false` to
-  email every run.
 - **Never fails a report.** Failures are retried, then recorded under `notification` in the
   JSON record. The CLI's `--no-email` skips the email for one run.
 
 Notes:
 
-- **Claude is used only with consent.** Users still tick the external-processing consent
-  box per run before deck text is sent to Claude. Without it, the app runs fully
-  deterministically.
+- **Claude is used whenever it is configured.** With `TEN_LLM_ENABLED=true` and an API key,
+  every run sends deck text to Claude. Without them, the app runs fully deterministically.
 - **Railway's disk is ephemeral.** Download the PDF and JSON from the Export step; files
-  written under storage consent do not survive a redeploy.
+  written to `TEN_OUTPUT_DIR` do not survive a redeploy.
 - **Changing the password.** Set a new value in the Railway dashboard (Variables); the
   service redeploys automatically.
 
@@ -247,7 +240,7 @@ Notes:
 | PDF | Text page by page with PyMuPDF, plus table detection. Citations read `Page N`. Encrypted, empty, and corrupt files produce actionable errors. |
 | PPTX | Text frames, grouped shapes, tables, chart titles/series, and speaker notes with python-pptx. Citations read `Slide N` (notes: `Slide N (speaker notes)`). |
 | PPT (97–2003) | Converted with LibreOffice when installed; otherwise the user is told to *Save As .pptx* or export to PDF. |
-| Scanned / image-only | Detected when at least 60% of pages have no text layer. The user is told which fields need manual entry. With the external model enabled and consented, page images can be read by the model; those values are labeled unverified and low-confidence. |
+| Scanned / image-only | Detected when at least 60% of pages have no text layer. The user is told which fields need manual entry. With the external model enabled, page images can be read by the model; those values are labeled unverified and low-confidence. |
 
 ---
 
@@ -437,24 +430,16 @@ round-trips losslessly. It contains:
 - `top_matches`, each with its full `score_breakdown`
 - `rejected_investors` (the filter audit)
 - `recommended_next_action` and `data_gaps`
-- `investor_dataset` (including the synthetic flag), `warnings`, and `consent`
+- `investor_dataset` (including the synthetic flag), and `warnings`
 - `external_processing` (whether an external model was used, which one, and for what)
 - `report` (page count, layout rung, and content reductions)
 
 ---
 
-## Privacy, consent and security
+## Privacy and security
 
-* **Four independent consents**, recorded with timestamp and source:
-  - analysis (required to process a deck)
-  - data storage (required to write any file)
-  - investor outreach (recorded only)
-  - external processing (required before anything is sent to a model API)
-
-  Analysis consent never implies outreach consent.
 * **No outreach.** The application contains no email, messaging or CRM-write code paths.
-* **External model is off by default.** It needs `TEN_LLM_ENABLED=true`, an API key, *and*
-  per-run consent. The UI shows exactly what will be sent and to whom.
+* **External model is off by default.** It needs `TEN_LLM_ENABLED=true` and an API key. The UI shows exactly what will be sent and to whom.
 
   Model output is checked locally:
   - An extracted value is kept only if its quoted evidence is found on the cited slide and its figures match. Otherwise it is discarded.
@@ -488,7 +473,7 @@ The suite covers:
 - Tiers and archetype fallback; no invented investor names
 - Concerns, outreach angles and next action
 - The external-model service (with a fake client): grounding, fabrication rejection and failure fallback
-- JSON validation and consent separation
+- JSON validation
 - PDF one-page overflow handling and font embedding
 - End-to-end runs through the pipeline, the CLI, and a Streamlit `AppTest` smoke test
 

@@ -9,12 +9,11 @@ from app.extraction.company_extractor import extract_company
 from app.ingestion.deck_parser import parse_deck
 from app.pipeline import run_matching
 from app.models.company import InvestorPreferences
-from app.models.consent import ConsentRecord
 
 
 @pytest.fixture
-def outcome(lumora_company, dataset, config, consent):
-    return run_matching(lumora_company, InvestorPreferences(), dataset, config, consent, today=TODAY)
+def outcome(lumora_company, dataset, config):
+    return run_matching(lumora_company, InvestorPreferences(), dataset, config, today=TODAY)
 
 
 def by_name(outcome, name):
@@ -38,15 +37,9 @@ def test_concerns_reflect_investor_constraints(outcome):
     assert any("Already an investor" in c for c in by_name(outcome, "Brightwater Seed Collective").likely_concerns)
 
 
-def test_next_action_names_tier1_and_requires_separate_outreach_approval(outcome):
+def test_next_action_names_tier1(outcome):
     assert "Aldermoor Health Ventures" in outcome.next_action
-    assert "separate approval" in outcome.next_action
-
-
-def test_outreach_consent_changes_only_the_caveat(lumora_company, dataset, config):
-    consent = ConsentRecord(analysis_consent=True, outreach_consent=True)
-    result = run_matching(lumora_company, InvestorPreferences(), dataset, config, consent, today=TODAY)
-    assert "separate approval" not in result.next_action
+    assert "separate approval" not in outcome.next_action
 
 
 def test_data_gaps_flag_synthetic_data_and_inference(outcome):
@@ -55,9 +48,9 @@ def test_data_gaps_flag_synthetic_data_and_inference(outcome):
     assert any("hard filters" in g for g in outcome.gaps)
 
 
-def test_missing_round_data_drives_next_action(samples, dataset, config, consent):
+def test_missing_round_data_drives_next_action(samples, dataset, config):
     company = extract_company(parse_deck(samples["sparse"])).company
-    result = run_matching(company, InvestorPreferences(), dataset, config, consent, today=TODAY)
+    result = run_matching(company, InvestorPreferences(), dataset, config, today=TODAY)
     assert result.next_action.startswith("Confirm the")
     assert "amount being raised" in result.next_action.lower()
 

@@ -1,23 +1,21 @@
 """Headless command line.
 
-    python -m app.cli sample_data/lumora_diagnostics_series_a.pdf \
-        --consent-analysis --consent-storage --out output
+    python -m app.cli sample_data/lumora_diagnostics_series_a.pdf --out output
 
-Writing files to disk requires --consent-storage. The CLI never contacts investors.
+The CLI never contacts investors.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 
 from app.config import PROJECT_ROOT, MatchingConfig, get_settings
-from app.errors import ConsentError, MatchingEngineError
+from app.errors import MatchingEngineError
 from app.matching.taxonomy import INVESTOR_TYPES, parse_investor_type
 from app.models.company import InvestorPreferences
-from app.models.consent import ConsentRecord
 from app.models.record import UserInfo
 from app.pipeline import run_end_to_end
 from app.reporting.template import render_template_pdf
@@ -54,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "optional output path, default docs/investor_matching_report_TEMPLATE.pdf")
     p.add_argument("--investors", type=Path, action="append", default=[], help="Investor dataset (.csv/.json); repeatable")
     p.add_argument("--no-default-investors", action="store_true", help="Do not load the configured default dataset")
-    p.add_argument("--out", type=Path, default=None, help="Output directory (requires --consent-storage)")
+    p.add_argument("--out", type=Path, default=None, help="Output directory for the PDF and JSON")
     p.add_argument("--notes", default="", help="Additional company information (treated as user-supplied)")
     p.add_argument("--prefer-type", action="append", default=[], help="Preferred investor type; repeatable")
     p.add_argument("--prefer-geo", action="append", default=[], help="Preferred investor geography; repeatable")
@@ -63,10 +61,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lead-required", choices=["auto", "yes", "no"], default="auto")
     p.add_argument("--weights", type=Path, default=None, help="Matching config TOML (weights, thresholds)")
     p.add_argument("--today", type=date.fromisoformat, default=None, help="Scoring date (YYYY-MM-DD)")
-    p.add_argument("--consent-analysis", action="store_true", help="Consent to analyze the deck (required)")
-    p.add_argument("--consent-storage", action="store_true", help="Consent to store outputs on disk")
-    p.add_argument("--consent-outreach", action="store_true", help="Record outreach consent (no outreach is performed)")
-    p.add_argument("--consent-external", action="store_true", help="Consent to send company data to the external model")
     p.add_argument("--no-email", action="store_true", help="Do not send the automated results email for this run")
     p.add_argument("--user-name", default="")
     p.add_argument("--user-email", default="")
@@ -78,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.template is not None:
-        # The blank template carries placeholders only - no company data, so no consent needed.
+        # The blank template carries placeholders only - no company data.
         try:
             result = render_template_pdf(args.template)
         except MatchingEngineError as exc:
@@ -90,14 +84,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("a deck path is required (or use --template to render the blank report template)")
     settings = get_settings()
     configure_logging(settings.log_level)
-    consent = ConsentRecord(
-        analysis_consent=args.consent_analysis, data_storage_consent=args.consent_storage,
-        outreach_consent=args.consent_outreach, external_processing_consent=args.consent_external,
-        timestamp=datetime.now(UTC), source="cli",
-    )
-    if args.out is not None and not consent.data_storage_consent:
-        print("Refusing to write files: add --consent-storage (or omit --out).", file=sys.stderr)
-        return 2
     try:
         config = MatchingConfig.load(args.weights) if args.weights else settings.matching_config()
         paths = ([] if args.no_default_investors else settings.investor_paths()) + list(args.investors)
@@ -108,17 +94,14 @@ def main(argv: list[str] | None = None) -> int:
             lead_required={"auto": None, "yes": True, "no": False}[args.lead_required],
         )
         llm = LLMService(settings)
-        if consent.external_processing_consent and llm.configured:
+        if llm.configured:
             print(_plain(f"Note: {llm.disclosure()}"), file=sys.stderr)
         result = run_end_to_end(
-            args.deck, settings=settings, consent=consent, preferences=preferences, dataset=dataset,
+            args.deck, settings=settings, preferences=preferences, dataset=dataset,
             config=config, notes_text=args.notes, today=args.today, out_dir=args.out, llm=llm,
             notify=not args.no_email,
             user=UserInfo(name=args.user_name, email=args.user_email, organization=args.user_org),
         )
-    except ConsentError as exc:
-        print(_plain(f"Consent required: {exc}"), file=sys.stderr)
-        return 2
     except MatchingEngineError as exc:
         print(_plain(f"Error: {exc}"), file=sys.stderr)
         return 1
@@ -140,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     if result.pdf_path:
         lines.append(f"\nPDF:  {result.pdf_path}\nJSON: {result.json_path}")
     elif args.out is None:
-        lines.append("\n(No files written. Pass --out DIR --consent-storage to save the PDF and JSON.)")
+        lines.append("\n(No files written. Pass --out DIR to save the PDF and JSON.)")
     print(_plain("\n".join(lines)))
     return 0
 

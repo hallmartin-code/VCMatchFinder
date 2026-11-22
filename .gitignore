@@ -10,3 +10,6 @@ venv/
 .mypy_cache/
 output/*
 !output/.gitkeep
+
+# Real investor data converted from the TEN master list: deployed to Railway, never committed
+data/investors/

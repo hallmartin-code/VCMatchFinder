@@ -13,14 +13,12 @@ from helpers import TODAY
 from app.cli import main as cli_main
 from app.config import Settings
 from app.models.company import InvestorPreferences
-from app.models.consent import ConsentRecord
 from app.pipeline import build_record, generate_report, notify_results, run_end_to_end, run_matching
 from app.reporting.json_exporter import validate_record_json
 from app.services import notification_service
 from app.services.notification_service import RESEND_EMAILS_URL, send_report_email
 
 STAMP = datetime(2026, 9, 11, 15, 0, tzinfo=UTC)
-CONSENT = ConsentRecord(analysis_consent=True, data_storage_consent=True, source="test")
 
 
 class FakeTransport:
@@ -47,8 +45,8 @@ def email_settings(tmp_path, **overrides: Any) -> Settings:
 
 @pytest.fixture
 def generated(lumora_company, dataset, config, settings):
-    outcome = run_matching(lumora_company, InvestorPreferences(), dataset, config, CONSENT, today=TODAY)
-    record = build_record(outcome, config=config, consent=CONSENT, settings=settings, timestamp=STAMP)
+    outcome = run_matching(lumora_company, InvestorPreferences(), dataset, config, today=TODAY)
+    record = build_record(outcome, config=config, settings=settings, timestamp=STAMP)
     report, record = generate_report(record)
     return record, report.pdf_bytes
 
@@ -56,7 +54,7 @@ def generated(lumora_company, dataset, config, settings):
 def test_results_email_payload(generated, tmp_path):
     record, pdf = generated
     transport = FakeTransport((200, b'{"id": "msg_123"}'))
-    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path), consent=CONSENT,
+    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path),
                                 transport=transport)
     assert outcome.sent and outcome.message_id == "msg_123"
     assert outcome.to == ["Info@tencapital.group"]
@@ -80,20 +78,6 @@ def test_results_email_payload(generated, tmp_path):
     validate_record_json(base64.b64decode(payload["attachments"][1]["content"]).decode("utf-8"))
 
 
-def test_email_follows_storage_consent(generated, tmp_path):
-    record, pdf = generated
-    transport = FakeTransport()
-    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path),
-                                consent=ConsentRecord(analysis_consent=True), transport=transport)
-    assert not outcome.attempted and "storage consent" in outcome.skipped_reason
-    assert transport.calls == []
-    # The rule is configurable.
-    allowed = email_settings(tmp_path, notify_requires_storage_consent=False)
-    transport = FakeTransport((200, b'{"id": "x"}'))
-    assert send_report_email(record, pdf, settings=allowed, consent=ConsentRecord(analysis_consent=True),
-                             transport=transport).sent
-
-
 @pytest.mark.parametrize(("overrides", "reason"), [
     ({"notify_enabled": False}, "disabled"),
     ({"resend_api_key": None}, "RESEND_API_KEY"),
@@ -102,7 +86,7 @@ def test_email_follows_storage_consent(generated, tmp_path):
 def test_unconfigured_email_is_skipped(generated, tmp_path, overrides, reason):
     record, pdf = generated
     transport = FakeTransport()
-    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path, **overrides), consent=CONSENT,
+    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path, **overrides),
                                 transport=transport)
     assert not outcome.sent and reason in outcome.skipped_reason and transport.calls == []
 
@@ -111,7 +95,7 @@ def test_server_errors_are_retried(generated, tmp_path, monkeypatch):
     monkeypatch.setattr(notification_service.time, "sleep", lambda _s: None)
     record, pdf = generated
     transport = FakeTransport((500, b"{}"), OSError("reset"), (200, b'{"id": "ok"}'))
-    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path), consent=CONSENT,
+    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path),
                                 transport=transport, sleep=lambda _s: None)
     assert outcome.sent and len(transport.calls) == 3
     keys = {c["headers"]["Idempotency-Key"] for c in transport.calls}
@@ -121,19 +105,19 @@ def test_server_errors_are_retried(generated, tmp_path, monkeypatch):
 def test_client_errors_fail_fast_and_never_raise(generated, tmp_path):
     record, pdf = generated
     transport = FakeTransport((422, b'{"message": "The tencapital.group domain is not verified."}'))
-    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path), consent=CONSENT,
+    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path),
                                 transport=transport, sleep=lambda _s: None)
     assert outcome.attempted and not outcome.sent
     assert "not verified" in outcome.error and len(transport.calls) == 1
     transport = FakeTransport(OSError("down"), OSError("down"), OSError("down"))
-    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path), consent=CONSENT,
+    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path),
                                 transport=transport, sleep=lambda _s: None)
     assert "could not reach Resend" in outcome.error and len(transport.calls) == 3
 
 
 def test_end_to_end_records_the_email_outcome(samples, tmp_path):
     transport = FakeTransport((200, b'{"id": "msg_e2e"}'))
-    result = run_end_to_end(samples["pdf"], settings=email_settings(tmp_path), consent=CONSENT, today=TODAY,
+    result = run_end_to_end(samples["pdf"], settings=email_settings(tmp_path), today=TODAY,
                             out_dir=tmp_path / "files", timestamp=STAMP, email_transport=transport)
     assert result.record.notification.sent and result.record.notification.message_id == "msg_e2e"
     saved = json.loads(result.json_path.read_text(encoding="utf-8"))
@@ -142,7 +126,7 @@ def test_end_to_end_records_the_email_outcome(samples, tmp_path):
 
 def test_email_failure_does_not_fail_the_report(generated, tmp_path):
     record, pdf = generated
-    outcome, updated = notify_results(record, pdf, settings=email_settings(tmp_path), consent=CONSENT,
+    outcome, updated = notify_results(record, pdf, settings=email_settings(tmp_path),
                                       transport=FakeTransport((401, b"{}")))
     assert not outcome.sent and "API key" in outcome.error
     assert updated.notification.error == outcome.error and updated.report.pdf_generated
@@ -150,10 +134,10 @@ def test_email_failure_does_not_fail_the_report(generated, tmp_path):
 
 def test_tests_can_never_send_real_email(generated, tmp_path):
     record, pdf = generated
-    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path), consent=CONSENT,
+    outcome = send_report_email(record, pdf, settings=email_settings(tmp_path),
                                 sleep=lambda _s: None)
     assert not outcome.sent and "could not reach Resend" in outcome.error  # real transport is blocked
 
 
 def test_cli_no_email_flag(samples):
-    assert cli_main([str(samples["pdf"]), "--consent-analysis", "--no-email"]) == 0
+    assert cli_main([str(samples["pdf"]), "--no-email"]) == 0

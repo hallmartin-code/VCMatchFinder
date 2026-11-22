@@ -68,7 +68,7 @@ def add_quality_warnings(doc: DeckDocument) -> None:
             f"Little or no extractable text ({len(doc.low_text_pages)} of {doc.page_count} "
             f"{doc.unit.lower()}s are image-only). The deck appears to be scanned or exported "
             "as images; most fields will need manual entry unless external vision extraction "
-            "is enabled and consented."
+            "is enabled."
         )
     elif doc.low_text_pages:
         shown = ", ".join(map(str, doc.low_text_pages[:12]))

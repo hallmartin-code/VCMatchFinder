@@ -14,7 +14,7 @@ as `[FIELD NAME]`.
 | `docs/INVESTOR_MATCHING_REPORT_TEMPLATE.md` | This human-readable specification. |
 | `docs/investor_matching_report_TEMPLATE.pdf` | The blank template, rendered by the application itself. |
 
-Render the blank template (placeholders only; no deck and no consent required):
+Render the blank template (placeholders only; no deck required):
 
 ```bash
 python -m app.cli --template                          # writes docs/investor_matching_report_TEMPLATE.pdf
@@ -179,8 +179,7 @@ T4 amber `#B26A00`. Confidence: High green · Medium amber · Low dark red.
 
 A single callout (320 characters), bound to `recommended_next_action`:
 
-`[RECOMMENDED NEXT ACTION — the single most important outreach step; ends with the
-outreach-approval caveat when outreach consent is not recorded]`
+`[RECOMMENDED NEXT ACTION — the single most important outreach step]`
 
 Selection order: confirm critical missing company fields first; otherwise approach Tier 1
 investors (with a lead package when the round needs a lead); otherwise verify Tier 2
@@ -345,7 +344,7 @@ Customer references · Technical validation · Use-of-funds schedule · Market a
 `schema_version` · `analysis_id` · `timestamp` · `user` · `source_deck` · `company` ·
 `company_provenance` · `investor_preferences` · `match_criteria` · `scoring_policy` ·
 `ideal_investor_profile` · `top_matches` · `rejected_investors` · `recommended_next_action` ·
-`data_gaps` · `investor_dataset` · `warnings` · `consent` · `external_processing` · `report` ·
+`data_gaps` · `investor_dataset` · `warnings` · `external_processing` · `report` ·
 `notification` (outcome of the automated results email)
 
 ---

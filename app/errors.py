@@ -28,10 +28,6 @@ class InvestorDataError(MatchingEngineError):
     """An investor dataset could not be loaded."""
 
 
-class ConsentError(MatchingEngineError):
-    """A step was attempted without the consent it requires."""
-
-
 class ConfigError(MatchingEngineError):
     """Configuration is invalid (e.g. weights that sum to zero)."""
 

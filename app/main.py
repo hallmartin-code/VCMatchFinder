@@ -23,7 +23,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import uuid  # noqa: E402
-from datetime import UTC, date, datetime  # noqa: E402
+from datetime import date  # noqa: E402
 from html import escape  # noqa: E402
 from typing import Any  # noqa: E402
 
@@ -35,7 +35,6 @@ from app.errors import ConfigError, MatchingEngineError  # noqa: E402
 from app.extraction.company_extractor import manual_entry_fields  # noqa: E402
 from app.matching.taxonomy import INVESTOR_TYPES, STAGE_LABELS, SUBSECTORS  # noqa: E402
 from app.models.company import FIELD_SPECS, CompanyProfile, InvestorPreferences  # noqa: E402
-from app.models.consent import ConsentRecord  # noqa: E402
 from app.models.match import EVIDENCE_LABELS, TIER_LABELS, InvestorMatch  # noqa: E402
 from app.models.record import UserInfo  # noqa: E402
 from app.pipeline import (  # noqa: E402
@@ -48,7 +47,11 @@ from app.pipeline import (  # noqa: E402
     save_outputs,
 )
 from app.reporting.json_exporter import record_to_json  # noqa: E402
-from app.services.investor_data_service import InvestorDataset, load_default_dataset  # noqa: E402
+from app.services.investor_data_service import (  # noqa: E402
+    InvestorDataset,
+    load_default_dataset,
+    load_investor_dataset,
+)
 from app.services.llm_service import LLMService  # noqa: E402
 from app.ui import theme  # noqa: E402
 from app.utils.provenance import SOURCE_LABELS  # noqa: E402
@@ -57,8 +60,7 @@ _TYPE_KEYS = [k for k in INVESTOR_TYPES if k != "unknown"]
 _UPLOAD_TYPES = ["pdf", "pptx", "ppt"]
 _MISSING_MARK = "Not in deck"
 _ANALYSIS_KEYS = ("session", "company", "outcome", "record", "pdf", "report", "saved", "notification",
-                  "analysis_id", "consent_record", "user_info")
-_WORKSPACE_CONSENT_KEYS = ("ws_storage", "ws_outreach", "ws_external")
+                  "analysis_id", "user_info")
 
 
 def _init_state() -> None:
@@ -73,40 +75,7 @@ def _reset_analysis() -> None:
         st.session_state[key] = None
     st.session_state.excluded_extra = []
     st.session_state.reviewed = False
-    for key in ("editor", *_WORKSPACE_CONSENT_KEYS):
-        st.session_state.pop(key, None)
-
-
-def _landing_consent() -> ConsentRecord:
-    return ConsentRecord(
-        analysis_consent=bool(st.session_state.get("c_analysis")),
-        data_storage_consent=bool(st.session_state.get("c_storage")),
-        outreach_consent=bool(st.session_state.get("c_outreach")),
-        external_processing_consent=bool(st.session_state.get("c_external")),
-        timestamp=datetime.now(UTC),
-        source="streamlit_ui",
-    )
-
-
-def _consent() -> ConsentRecord:
-    """Consent for the current analysis.
-
-    Streamlit discards a widget's state once the widget stops rendering, so the landing
-    checkboxes cannot be read from the workspace. Consent is therefore captured when the deck
-    is analyzed, and changed afterwards only through the workspace's own consent controls.
-    """
-    stored: ConsentRecord | None = st.session_state.get("consent_record")
-    if stored is None:
-        return _landing_consent()
-    flags = {
-        "data_storage_consent": bool(st.session_state.get("ws_storage", stored.data_storage_consent)),
-        "outreach_consent": bool(st.session_state.get("ws_outreach", stored.outreach_consent)),
-        "external_processing_consent": bool(st.session_state.get("ws_external", stored.external_processing_consent)),
-    }
-    if any(getattr(stored, key) != value for key, value in flags.items()):
-        stored = stored.model_copy(update={**flags, "timestamp": datetime.now(UTC)})
-        st.session_state.consent_record = stored
-    return stored
+    st.session_state.pop("editor", None)
 
 
 def _user() -> UserInfo:
@@ -134,12 +103,12 @@ def _disclosures(settings: Any, llm: LLMService) -> list[str]:
         f"<code>.pdf</code> <code>.pptx</code> <code>.ppt</code>, up to {settings.max_upload_mb}&nbsp;MB."
     ]
     if settings.notify_configured:
-        rule = ("when you grant storage consent" if settings.notify_requires_storage_consent
-                else "for every analysis")
         recipients = ", ".join(f"<code>{escape(r)}</code>" for r in settings.notify_recipients())
-        items.append(f"A copy of each generated report is emailed to {recipients} {rule}.")
+        items.append(f"Generated reports are saved on the server and a copy of each is emailed to {recipients}.")
+    else:
+        items.append("Generated reports are saved on the server.")
     if llm.configured:
-        items.append(f"With your consent, deck text is sent to Anthropic's Claude (<code>{escape(llm.model)}</code>) "
+        items.append(f"Deck text is sent to Anthropic's Claude (<code>{escape(llm.model)}</code>) "
                      "to extract facts and draft match explanations. Scores are always computed by the engine.")
     items.append("Recommendations are for human review. This app never contacts investors.")
     return items
@@ -149,21 +118,6 @@ def _disclosures(settings: Any, llm: LLMService) -> list[str]:
 
 
 def render_sidebar(base: MatchingConfig, llm: LLMService, settings: Any) -> MatchingConfig:
-    consent: ConsentRecord | None = st.session_state.get("consent_record")
-    if consent is not None:
-        st.sidebar.header("Consent for this analysis")
-        st.sidebar.caption(f"Analysis consent granted {consent.timestamp:%Y-%m-%d %H:%M} UTC. "
-                           "The others can be changed at any time.")
-        storage = "Store the outputs"
-        if settings.notify_configured:
-            storage += f" and email a copy to `{', '.join(settings.notify_recipients())}`"
-        st.sidebar.checkbox(storage, value=consent.data_storage_consent, key="ws_storage")
-        st.sidebar.checkbox("Outreach may be considered later (recorded only)", value=consent.outreach_consent,
-                            key="ws_outreach")
-        if llm.configured:
-            st.sidebar.checkbox("Send company information to Claude", value=consent.external_processing_consent,
-                                key="ws_external")
-        st.sidebar.divider()
     st.sidebar.header("Scoring weights")
     st.sidebar.caption("Weights are normalized to 100. Scores are computed deterministically.")
     if st.sidebar.button("Reset weights"):
@@ -183,8 +137,7 @@ def render_sidebar(base: MatchingConfig, llm: LLMService, settings: Any) -> Matc
         st.sidebar.info("Disabled - fully deterministic mode; no deck text is sent to a model.")
     st.sidebar.subheader("Results email")
     if settings.notify_configured:
-        rule = " when storage consent is given" if settings.notify_requires_storage_consent else ""
-        st.sidebar.success(f"On: each generated report is emailed to {', '.join(settings.notify_recipients())}{rule}.")
+        st.sidebar.success(f"On: each generated report is emailed to {', '.join(settings.notify_recipients())}.")
     else:
         st.sidebar.info("Off (set TEN_NOTIFY_ENABLED and RESEND_API_KEY to enable).")
     try:
@@ -215,37 +168,20 @@ def render_landing(settings: Any, llm: LLMService) -> None:
             st.text_input("Your email", key="u_email")
             st.text_input("Organization", key="u_org")
 
-        theme.label("Consent · each permission is separate")
-        st.checkbox("I consent to analysis of this deck (required)", key="c_analysis")
-        storage_label = "I consent to storing the outputs (saved on the server"
-        if settings.notify_configured:
-            storage_label += f" and a copy emailed to `{', '.join(settings.notify_recipients())}`"
-        st.checkbox(storage_label + ")", key="c_storage")
-        st.checkbox("I consent to investor outreach being considered later (recorded only - this app never "
-                    "contacts investors)", key="c_outreach")
-        if llm.configured:
-            st.checkbox("I consent to sending company information to Claude for analysis", key="c_external",
-                        help=llm.disclosure())
-
         if st.button("Analyze deck", type="primary", disabled=upload is None):
-            consent = _consent()
-            if not consent.analysis_consent:
-                st.error("Analysis consent is required before the deck can be analyzed.")
+            try:
+                with st.spinner("Reading the deck and extracting company information..."):
+                    session = analyze_deck(settings=settings,
+                                           upload=(upload.name, upload.getvalue()),
+                                           notes_text=st.session_state.get("notes", ""), llm=llm)
+            except MatchingEngineError as exc:
+                st.error(str(exc))
             else:
-                try:
-                    with st.spinner("Reading the deck and extracting company information..."):
-                        session = analyze_deck(settings=settings, consent=consent,
-                                               upload=(upload.name, upload.getvalue()),
-                                               notes_text=st.session_state.get("notes", ""), llm=llm)
-                except MatchingEngineError as exc:
-                    st.error(str(exc))
-                else:
-                    user = _user()
-                    _reset_analysis()
-                    st.session_state.update(session=session, company=session.company,
-                                            analysis_id=str(uuid.uuid4()), consent_record=consent,
-                                            user_info=user)
-                    st.rerun()
+                user = _user()
+                _reset_analysis()
+                st.session_state.update(session=session, company=session.company,
+                                        analysis_id=str(uuid.uuid4()), user_info=user)
+                st.rerun()
         theme.disclosure(_disclosures(settings, llm))
     theme.footer()
 
@@ -309,6 +245,19 @@ def render_review(*, active: bool) -> None:
 # ---------------------------------------------------------------------------- step 3
 
 
+@st.cache_resource(show_spinner="Loading the investor list...")
+def _cached_dataset(signature: tuple[tuple[str, float, int], ...]) -> InvestorDataset:
+    return load_investor_dataset([Path(p) for p, _mtime, _size in signature])
+
+
+def _configured_dataset(settings: Any) -> InvestorDataset:
+    """The configured investor dataset(s), parsed once per file version rather than on every rerun (the TEN
+    master list has ~20,000 records)."""
+    signature = tuple((str(p), p.stat().st_mtime, p.stat().st_size) if p.exists() else (str(p), 0.0, -1)
+                      for p in settings.investor_paths())
+    return _cached_dataset(signature)
+
+
 def render_preferences(settings: Any, *, active: bool) -> tuple[InvestorPreferences, InvestorDataset]:
     with theme.panel(3, "Investor preferences and data",
                      "Optional targeting. Exclusions become hard filters; preferences add a small, "
@@ -325,9 +274,14 @@ def render_preferences(settings: Any, *, active: bool) -> tuple[InvestorPreferen
             use_default = st.checkbox("Include the configured investor dataset", value=True, key="p_default")
             uploads = st.file_uploader("Additional investor datasets (CSV/JSON)", type=["csv", "json"],
                                        accept_multiple_files=True, key="p_uploads")
-        dataset = load_default_dataset(settings, [(f.name, f.getvalue()) for f in uploads or []],
-                                       include_defaults=use_default)
-        st.caption(f"Investor data: {dataset.label()} · {len(dataset.investors)} records")
+        if uploads:
+            dataset = load_default_dataset(settings, [(f.name, f.getvalue()) for f in uploads],
+                                           include_defaults=use_default)
+        elif use_default:
+            dataset = _configured_dataset(settings)
+        else:
+            dataset = load_default_dataset(settings, [], include_defaults=False)
+        st.caption(f"Investor data: {dataset.label()} · {len(dataset.investors):,} records")
         for warning in dataset.warnings:
             (st.error if "SYNTHETIC" in warning else st.caption)(theme.safe_md(warning))
         excluded_names = st.multiselect("Excluded investors", sorted({i.name for i in dataset.investors}),
@@ -381,14 +335,13 @@ def render_matches(settings: Any, config: MatchingConfig, prefs: tuple[InvestorP
         recalc = cols[1].button("Recalculate")
         if run or recalc:
             st.session_state.run_requested = False
-            consent = _consent()
             try:
                 session = st.session_state.session
-                spinner = "Scoring investors and drafting explanations..." if llm.allowed(consent) \
+                spinner = "Scoring investors and drafting explanations..." if llm.configured \
                     else "Scoring investors..."
                 with st.spinner(spinner):
                     st.session_state.outcome = run_matching(
-                        st.session_state.company, preferences, dataset, config, consent, llm=llm,
+                        st.session_state.company, preferences, dataset, config, llm=llm,
                         deck_scanned=bool(session and session.extraction.deck_scanned))
                 st.session_state.update(record=None, pdf=None, report=None, saved=None, notification=None)
             except MatchingEngineError as exc:
@@ -457,10 +410,9 @@ def render_export(settings: Any, config: MatchingConfig, *, active: bool) -> Non
         if outcome is None:
             st.caption("Available after matching.")
             return
-        consent = _consent()
 
         def current_record() -> Any:
-            return build_record(outcome, config=config, consent=consent, settings=settings,
+            return build_record(outcome, config=config, settings=settings,
                                 session=st.session_state.session, user=_user(),
                                 analysis_id=st.session_state.analysis_id)
 
@@ -473,13 +425,11 @@ def render_export(settings: Any, config: MatchingConfig, *, active: bool) -> Non
                 st.error(str(exc))
                 return
             with st.spinner("Emailing the results..." if settings.notify_configured else "Finishing..."):
-                sent, record = notify_results(record, report.pdf_bytes, settings=settings, consent=consent)
+                sent, record = notify_results(record, report.pdf_bytes, settings=settings)
             st.session_state.update(record=record, pdf=report.pdf_bytes, report=report, saved=None,
                                     notification=sent)
-            if consent.data_storage_consent:
-                json_path, pdf_path = save_outputs(record, report.pdf_bytes, settings.resolve(settings.output_dir),
-                                                   consent)
-                st.session_state.saved = (json_path, pdf_path)
+            json_path, pdf_path = save_outputs(record, report.pdf_bytes, settings.resolve(settings.output_dir))
+            st.session_state.saved = (json_path, pdf_path)
             st.rerun()
         if cols[1].button("Export JSON"):
             st.session_state.record = st.session_state.record or current_record()
@@ -501,9 +451,7 @@ def render_export(settings: Any, config: MatchingConfig, *, active: bool) -> Non
                                          mime="application/json")
         if st.session_state.saved:
             json_path, pdf_path = st.session_state.saved
-            st.caption(f"Saved on the server (storage consent granted): {pdf_path.name} and {json_path.name}")
-        elif not consent.data_storage_consent:
-            st.caption("Nothing was stored: storage consent not granted. Use the download buttons.")
+            st.caption(f"Saved on the server: {pdf_path.name} and {json_path.name}")
         sent = st.session_state.get("notification")
         if sent is not None and settings.notify_configured:
             if sent.sent:
